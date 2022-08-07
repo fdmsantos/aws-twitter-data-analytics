@@ -22,6 +22,7 @@
 .terraform.lock.hcl
 terraform.tfstate
 terraform.tfstate.backup
+.terraform.tfstate.lock.info
 
 # Ignore Env files
-data-collection/.env
+.env

@@ -15,3 +15,15 @@ cd deploy
 terraform init
 terrraform apply
 ```
+
+## DataCollection APP
+
+### Run Local
+
+* Create the environment variables represented .env.example file
+  * When the app runs locally, you need have PROFILE configure in your aws credentials file with permissions to assume a role with the necessary permissions to send records to Kinesis firehose
+
+```shell
+cd 01-data-collection-app
+go run main.go
+```
