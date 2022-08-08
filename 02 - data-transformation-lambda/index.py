@@ -17,6 +17,10 @@ def lambda_handler(event, context):
                 final_record = payload_json["data"][0]
                 final_record["users"] = payload_json["includes"]["users"]
 
+            final_record["year"] = final_record["created_at"][0:4]
+            final_record["month"] = final_record["created_at"][5:7]
+            final_record["day"] = final_record["created_at"][8:10]
+
             output_record = {
                 'recordId': record['recordId'],
                 'result': 'Ok',

@@ -27,12 +27,18 @@ cd 01-data-collection-app
 go run main.go
 ```
 
-## Data Catalog
+## Data ETL / Catalog
+
+* Run Glue Job
+
+```shell
+aws glue start-job-run --job-name $(terraform output -json | jq -r .glue_drop_duplicates_job.value)
+```
 
 * Run Crawler
 
 ```shell
-aws glue start-crawler --name $(terraform output -json | jq -r .glue-tweet-crawler)
+aws glue start-crawler --name $(terraform output -json | jq -r .glue_tweet_crawler.value)
 ```
 
 ## WIP
@@ -42,7 +48,6 @@ aws glue start-crawler --name $(terraform output -json | jq -r .glue-tweet-crawl
   * Enable File Format Conversion to Parquet/ORC
 * Glue Crawler
   * Add custom classifiers
-  * Create Glue Job to Delete duplicates
 * EMR 
   * Deploy Transient EME
   * Run Hive QL Job
