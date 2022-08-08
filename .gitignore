@@ -26,3 +26,6 @@ terraform.tfstate.backup
 
 # Ignore Env files
 .env
+
+# Ignore Lambda Builds
+builds

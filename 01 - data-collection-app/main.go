@@ -138,6 +138,7 @@ func main() {
 					if err != nil {
 						fmt.Printf("error decoding tweet message %v", err)
 					}
+					fmt.Println("related tweet")
 					if _, err := firehoseService.PutRecord(&firehose.PutRecordInput{
 						DeliveryStreamName: aws.String(os.Getenv("KINESIS_FIREHOSE_NAME")),
 						Record: &firehose.Record{

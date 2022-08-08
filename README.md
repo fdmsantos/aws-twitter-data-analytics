@@ -11,7 +11,6 @@ Project to Learn Data analyst in AWS using twitter data
 ## Deploy
 
 ```bash
-cd deploy
 terraform init
 terrraform apply
 ```
