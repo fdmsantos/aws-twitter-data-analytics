@@ -26,3 +26,38 @@ terrraform apply
 cd 01-data-collection-app
 go run main.go
 ```
+
+## Data Catalog
+
+* Run Crawler
+
+```shell
+aws glue start-crawler --name $(terraform output -json | jq -r .glue-tweet-crawler)
+```
+
+## WIP
+
+* Firehose
+  * Enable Comprehension 
+  * Enable File Format Conversion to Parquet/ORC
+* Glue Crawler
+  * Add custom classifiers
+  * Create Glue Job to Delete duplicates
+* EMR 
+  * Deploy Transient EME
+  * Run Hive QL Job
+    * Possible Query
+
+```hiveql
+SELECT context.entity.name, count(*)
+FROM tweets, UNNEST(context_annotations) t(context)
+WHERE context.domain.id = '60'
+GROUP BY context.entity.name, year, month, day
+HAVING year = '2022'
+AND month = '08'
+AND day = '05'
+```
+
+* Redshift
+  * Load outpur from EMR to Redshift
+* Quicksight
