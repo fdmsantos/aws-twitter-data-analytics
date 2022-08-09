@@ -11,34 +11,32 @@ Project to Learn Data analyst in AWS using twitter data
 ## Deploy
 
 ```bash
-terraform init
-terrraform apply
+make deploy
 ```
 
 ## DataCollection APP
 
 ### Run Local
 
-* Create the environment variables represented .env.example file
-  * When the app runs locally, you need have PROFILE configure in your aws credentials file with permissions to assume a role with the necessary permissions to send records to Kinesis firehose
+* Copy .env.example to .env and add your variables values
+  * When the app runs locally, you need have AWS PROFILE configure in your aws credentials file with permissions to assume a role with the necessary permissions to send records to Kinesis firehose
 
 ```shell
-cd 01-data-collection-app
-go run main.go
+make run-collection
 ```
 
 ## Data ETL / Catalog
 
-* Run Glue Job
+* Run Glue Job to Drop duplicates
 
 ```shell
-aws glue start-job-run --job-name $(terraform output -json | jq -r .glue_drop_duplicates_job.value)
+make run-drop-duplicates
 ```
 
 * Run Crawler
 
 ```shell
-aws glue start-crawler --name $(terraform output -json | jq -r .glue_tweet_crawler.value)
+make run-crawler
 ```
 
 ## WIP
@@ -49,7 +47,7 @@ aws glue start-crawler --name $(terraform output -json | jq -r .glue_tweet_crawl
 * Glue Crawler
   * Add custom classifiers
 * EMR 
-  * Deploy Transient EME
+  * Deploy Transient EMR
   * Run Hive QL Job
     * Use Analytics Functions. See udemy course 
     * Possible Query
