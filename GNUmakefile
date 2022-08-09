@@ -1,5 +1,7 @@
 CRAWLER_NAME = $(shell terraform output -json | jq -r .glue_tweet_crawler.value)
 DROP_DUPLICATES_JOB = $(shell terraform output -json | jq -r .glue_drop_duplicates_job.value)
+GLUE_WORKFLOW = $(shell terraform output -json | jq -r .glue_workflow.value)
+EMR_PUBLIC_DNS = $(shell terraform output -json | jq -r .emr_public_dns.value)
 
 define setup_collection_env
 	$(eval ENV_FILE := 01-data-collection-app/.env)
@@ -12,14 +14,23 @@ run-collection:
 	$(call setup_collection_env)
 	cd 01-data-collection-app && go run main.go
 
+run-glue-workflow:
+	aws glue start-workflow-run --name $(GLUE_WORKFLOW)
+
 run-drop-duplicates:
 	aws glue start-job-run --job-name $(DROP_DUPLICATES_JOB)
 
 run-crawler:
 	aws glue start-crawler --name $(CRAWLER_NAME)
 
+ssh-emr:
+	ssh -i $(EMR_KEY) hadoop@$(EMR_PUBLIC_DNS)
+
 deploy:
 	terraform init
 	terraform apply
 
-.PHONY: run-collection run-drop-duplicates run-crawler deploy
+destroy:
+	terraform destroy
+
+.PHONY: run-collection run-glue-workflow run-drop-duplicates run-crawler deploy destroy ssh-emr

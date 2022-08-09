@@ -9,3 +9,11 @@ output "glue_tweet_crawler" {
 output "glue_drop_duplicates_job" {
   value = var.enable_etl ? aws_glue_job.drop_duplicates[0].name : null
 }
+
+output "glue_workflow" {
+  value = var.enable_etl ? aws_glue_workflow.this[0].name : null
+}
+
+output "emr_public_dns" {
+  value = var.enable_emr ? aws_emr_cluster.this[0].master_public_dns : null
+}
