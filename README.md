@@ -51,6 +51,7 @@ aws glue start-crawler --name $(terraform output -json | jq -r .glue_tweet_crawl
 * EMR 
   * Deploy Transient EME
   * Run Hive QL Job
+    * Use Analytics Functions. See udemy course 
     * Possible Query
 
 ```hiveql
@@ -62,7 +63,16 @@ HAVING year = '2022'
 AND month = '08'
 AND day = '05'
 ```
-
 * Redshift
-  * Load outpur from EMR to Redshift
+  * Load output from EMR to Redshift
 * Quicksight
+  * Percentil Graph
+* Amazon Rekogniton
+  * Analysis Athletes Photos and identify the objects
+* Amazon Translate
+  * Translate Tweets
+* Amazon Comprehend
+  * Tweets Sentimental Analysis
+* Firehose Data Analytics
+  * Check for NBA Tempering. Use window analysis. 3 tweets in 5 minutes = tempering
+* Data Profiling Solution

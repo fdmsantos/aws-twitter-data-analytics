@@ -32,8 +32,9 @@ resource "aws_s3_bucket_public_access_block" "code_public_access_block" {
   restrict_public_buckets = true
 }
 
-################# Firehose #################
+################# Data Collection #################
 module "firehose_lambda_transformation" {
+  count                             = var.enable_data_collection ? 1 : 0
   source                            = "terraform-aws-modules/lambda/aws"
   function_name                     = "${var.name_prefix}-tweets-transformation"
   description                       = "Lambda to transform tweets records"
@@ -52,7 +53,8 @@ module "firehose_lambda_transformation" {
 }
 
 resource "aws_iam_role" "firehose_role" {
-  name = "${var.name_prefix}-firehose-role"
+  count = var.enable_data_collection ? 1 : 0
+  name  = "${var.name_prefix}-firehose-role"
 
   assume_role_policy = <<EOF
 {
@@ -72,8 +74,9 @@ EOF
 }
 
 resource "aws_iam_role_policy" "firehose-s3" {
+  count  = var.enable_data_collection ? 1 : 0
   name   = "s3"
-  role   = aws_iam_role.firehose_role.id
+  role   = aws_iam_role.firehose_role[0].id
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -94,8 +97,9 @@ EOF
 }
 
 resource "aws_iam_role_policy" "firehose-lambda" {
+  count  = var.enable_data_collection ? 1 : 0
   name   = "lambda"
-  role   = aws_iam_role.firehose_role.id
+  role   = aws_iam_role.firehose_role[0].id
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -106,7 +110,7 @@ resource "aws_iam_role_policy" "firehose-lambda" {
         "lambda:InvokeFunction",
         "lambda:GetFunctionConfiguration"
       ],
-      "Resource": "${module.firehose_lambda_transformation.lambda_function_arn}:*"
+      "Resource": "${module.firehose_lambda_transformation[0].lambda_function_arn}:*"
     }
   ]
 }
@@ -114,11 +118,12 @@ EOF
 }
 
 resource "aws_kinesis_firehose_delivery_stream" "this" {
+  count       = var.enable_data_collection ? 1 : 0
   name        = "${var.name_prefix}-data-collection"
   destination = "extended_s3"
 
   extended_s3_configuration {
-    role_arn        = aws_iam_role.firehose_role.arn
+    role_arn        = aws_iam_role.firehose_role[0].arn
     bucket_arn      = aws_s3_bucket.dataLake.arn
     buffer_interval = 60
     buffer_size     = 64
@@ -128,7 +133,7 @@ resource "aws_kinesis_firehose_delivery_stream" "this" {
 
     s3_backup_mode = "Enabled"
     s3_backup_configuration {
-      role_arn            = aws_iam_role.firehose_role.arn
+      role_arn            = aws_iam_role.firehose_role[0].arn
       bucket_arn          = aws_s3_bucket.dataLake.arn
       prefix              = "original-data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
       error_output_prefix = "original-data-errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/error=!{firehose:error-output-type}/"
@@ -152,7 +157,7 @@ resource "aws_kinesis_firehose_delivery_stream" "this" {
 
         parameters {
           parameter_name  = "LambdaArn"
-          parameter_value = "${module.firehose_lambda_transformation.lambda_function_arn}:$LATEST"
+          parameter_value = "${module.firehose_lambda_transformation[0].lambda_function_arn}:$LATEST"
         }
       }
 
@@ -174,6 +179,7 @@ resource "aws_kinesis_firehose_delivery_stream" "this" {
 ################# GLUE #################
 ###### ETL ######
 data "template_file" "drop_duplicates" {
+  count    = var.enable_etl ? 1 : 0
   template = file("${path.module}/03 - drop-duplicates-script/drop-duplicates.py")
   vars = {
     S3_INPUT_BUCKET_URI  = "s3://${aws_s3_bucket.dataLake.bucket}/${local.raw_data_location_prefix}"
@@ -182,21 +188,23 @@ data "template_file" "drop_duplicates" {
 }
 
 resource "aws_s3_object" "drop_duplicates" {
+  count   = var.enable_etl ? 1 : 0
   bucket  = aws_s3_bucket.assets.bucket
   key     = "drop_duplicates.py"
-  content = data.template_file.drop_duplicates.rendered
+  content = data.template_file.drop_duplicates[0].rendered
 }
 
 resource "aws_glue_job" "drop_duplicates" {
+  count             = var.enable_etl ? 1 : 0
   name              = "${var.name_prefix}-drop-duplicates"
-  role_arn          = aws_iam_role.glue_job_drop_duplicates_role.arn
+  role_arn          = aws_iam_role.glue_job_drop_duplicates_role[0].arn
   description       = "Glue Job to drop duplicated tweets"
   glue_version      = "3.0"
   worker_type       = "G.1X"
   number_of_workers = 10
 
   command {
-    script_location = "s3://${aws_s3_bucket.assets.bucket}/${aws_s3_object.drop_duplicates.key}"
+    script_location = "s3://${aws_s3_bucket.assets.bucket}/${aws_s3_object.drop_duplicates[0].key}"
     python_version  = 3
   }
 
@@ -210,7 +218,8 @@ resource "aws_glue_job" "drop_duplicates" {
 }
 
 resource "aws_iam_role" "glue_job_drop_duplicates_role" {
-  name = "${var.name_prefix}-glue-job-drop-duplicates-role"
+  count = var.enable_etl ? 1 : 0
+  name  = "${var.name_prefix}-glue-job-drop-duplicates-role"
 
   assume_role_policy = <<EOF
 {
@@ -230,8 +239,9 @@ EOF
 }
 
 resource "aws_iam_role_policy" "glue_job_drop_duplicates_policy" {
+  count  = var.enable_etl ? 1 : 0
   name   = "s3"
-  role   = aws_iam_role.glue_job_drop_duplicates_role.id
+  role   = aws_iam_role.glue_job_drop_duplicates_role[0].id
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -250,14 +260,16 @@ EOF
 
 ###### Data Catalog ######
 resource "aws_glue_catalog_database" "this" {
+  count      = var.enable_data_collection ? 1 : 0
   catalog_id = data.aws_caller_identity.this.id
   name       = replace("${var.name_prefix}-db", "-", "_")
 }
 
 resource "aws_glue_crawler" "this" {
-  database_name = aws_glue_catalog_database.this.name
+  count         = var.enable_data_collection ? 1 : 0
+  database_name = aws_glue_catalog_database.this[0].name
   name          = "${var.name_prefix}-crawler"
-  role          = aws_iam_role.glue_crawler_role.arn
+  role          = aws_iam_role.glue_crawler_role[0].arn
 
   s3_target {
     path = "s3://${aws_s3_bucket.dataLake.bucket}/tweets"
@@ -275,7 +287,8 @@ resource "aws_glue_crawler" "this" {
 }
 
 resource "aws_iam_role" "glue_crawler_role" {
-  name = "${var.name_prefix}-glue-crawler-role"
+  count = var.enable_data_collection ? 1 : 0
+  name  = "${var.name_prefix}-glue-crawler-role"
 
   assume_role_policy = <<EOF
 {
@@ -295,8 +308,9 @@ EOF
 }
 
 resource "aws_iam_role_policy" "glue_crawler_s3" {
+  count  = var.enable_data_collection ? 1 : 0
   name   = "s3"
-  role   = aws_iam_role.glue_crawler_role.id
+  role   = aws_iam_role.glue_crawler_role[0].id
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -318,6 +332,7 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "glue_service_policy" {
-  role       = aws_iam_role.glue_crawler_role.name
+  count      = var.enable_data_collection ? 1 : 0
+  role       = aws_iam_role.glue_crawler_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
 }
