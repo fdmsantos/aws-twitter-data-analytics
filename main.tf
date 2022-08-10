@@ -1,8 +1,21 @@
 data "aws_caller_identity" "this" {}
 
 locals {
-  raw_data_location_prefix    = "raw"
-  tweets_data_location_prefix = "tweets"
+  raw_data_location_prefix            = "raw"
+  tweets_data_location_prefix         = "tweets"
+  players_total_tweets_mentions_table = "PlayersTotalTweets"
+  states_emr_applications             = jsonencode([for application in var.emr_applications : { Name : application }])
+  emr_s3_logs_uri                     = "s3://${aws_s3_bucket.assets.bucket}/emr/logs"
+  emr_configurations                  = <<EOF
+[
+  {
+    "Classification": "hive-site",
+    "Properties": {
+      "hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+    }
+  }
+]
+EOF
 }
 
 ###### S3 ######
@@ -40,7 +53,7 @@ module "firehose_lambda_transformation" {
   description                       = "Lambda to transform tweets records"
   handler                           = "index.lambda_handler"
   runtime                           = "python3.9"
-  source_path                       = "${path.module}/02 - data-transformation-lambda"
+  source_path                       = "${path.module}/02-data-transformation-lambda"
   recreate_missing_package          = true
   ignore_source_code_hash           = true
   build_in_docker                   = true
@@ -179,8 +192,8 @@ resource "aws_kinesis_firehose_delivery_stream" "this" {
 ################# GLUE #################
 ###### ETL ######
 data "template_file" "drop_duplicates" {
-  count    = var.enable_etl ? 1 : 0
-  template = file("${path.module}/03 - drop-duplicates-script/drop-duplicates.py")
+  count    = var.enable_glue_etl || var.enable_step_functions ? 1 : 0
+  template = file("${path.module}/03-drop-duplicates-script/drop-duplicates.py")
   vars = {
     S3_INPUT_BUCKET_URI  = "s3://${aws_s3_bucket.dataLake.bucket}/${local.raw_data_location_prefix}"
     S3_OUTPUT_BUCKET_URI = "s3://${aws_s3_bucket.dataLake.bucket}/${local.tweets_data_location_prefix}"
@@ -188,14 +201,14 @@ data "template_file" "drop_duplicates" {
 }
 
 resource "aws_s3_object" "drop_duplicates" {
-  count   = var.enable_etl ? 1 : 0
+  count   = var.enable_glue_etl || var.enable_step_functions ? 1 : 0
   bucket  = aws_s3_bucket.assets.bucket
   key     = "GlueJobs/DropDuplicates/drop_duplicates.py"
   content = data.template_file.drop_duplicates[0].rendered
 }
 
 resource "aws_glue_job" "drop_duplicates" {
-  count             = var.enable_etl ? 1 : 0
+  count             = var.enable_glue_etl || var.enable_step_functions ? 1 : 0
   name              = "${var.name_prefix}-drop-duplicates"
   role_arn          = aws_iam_role.glue_job_drop_duplicates_role[0].arn
   description       = "Glue Job to drop duplicated tweets"
@@ -204,7 +217,7 @@ resource "aws_glue_job" "drop_duplicates" {
   number_of_workers = 10
 
   command {
-    script_location = "s3://${aws_s3_bucket.assets.bucket}/${aws_s3_object.drop_duplicates[0].key}"
+    script_location = "s3://${aws_s3_object.drop_duplicates[0].bucket}/${aws_s3_object.drop_duplicates[0].key}"
     python_version  = 3
   }
 
@@ -218,7 +231,7 @@ resource "aws_glue_job" "drop_duplicates" {
 }
 
 resource "aws_iam_role" "glue_job_drop_duplicates_role" {
-  count = var.enable_etl ? 1 : 0
+  count = var.enable_glue_etl || var.enable_step_functions ? 1 : 0
   name  = "${var.name_prefix}-glue-job-drop-duplicates-role"
 
   assume_role_policy = <<EOF
@@ -239,7 +252,7 @@ EOF
 }
 
 resource "aws_iam_role_policy" "glue_job_drop_duplicates_policy" {
-  count  = var.enable_etl ? 1 : 0
+  count  = var.enable_glue_etl || var.enable_step_functions ? 1 : 0
   name   = "s3"
   role   = aws_iam_role.glue_job_drop_duplicates_role[0].id
   policy = <<EOF
@@ -259,14 +272,14 @@ EOF
 }
 
 ###### Data Catalog ######
-resource "aws_glue_catalog_database" "this" {
-  count      = var.enable_data_catalog ? 1 : 0
+resource "aws_glue_catalog_database" "this" { # TODO Should be always created. Remove enable_data_catalog variable
+  count      = var.enable_data_catalog || var.enable_glue_etl || var.enable_step_functions ? 1 : 0
   catalog_id = data.aws_caller_identity.this.id
   name       = replace("${var.name_prefix}-db", "-", "_")
 }
 
 resource "aws_glue_crawler" "this" {
-  count         = var.enable_data_catalog ? 1 : 0
+  count         = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
   database_name = aws_glue_catalog_database.this[0].name
   name          = "${var.name_prefix}-crawler"
   role          = aws_iam_role.glue_crawler_role[0].arn
@@ -287,7 +300,7 @@ resource "aws_glue_crawler" "this" {
 }
 
 resource "aws_iam_role" "glue_crawler_role" {
-  count = var.enable_data_catalog ? 1 : 0
+  count = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
   name  = "${var.name_prefix}-glue-crawler-role"
 
   assume_role_policy = <<EOF
@@ -308,7 +321,7 @@ EOF
 }
 
 resource "aws_iam_role_policy" "glue_crawler_s3" {
-  count  = var.enable_data_catalog ? 1 : 0
+  count  = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
   name   = "s3"
   role   = aws_iam_role.glue_crawler_role[0].id
   policy = <<EOF
@@ -332,20 +345,20 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "glue_service_policy" {
-  count      = var.enable_data_catalog ? 1 : 0
+  count      = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
   role       = aws_iam_role.glue_crawler_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
 }
 
 ###### Glue Workflow ######
 resource "aws_glue_workflow" "this" {
-  count       = var.enable_etl ? 1 : 0
+  count       = var.enable_glue_etl ? 1 : 0
   name        = "${var.name_prefix}-glue-workflow"
   description = "Glue Workflow for nba twitter"
 }
 
 resource "aws_glue_trigger" "trigger_workflow" {
-  count         = var.enable_etl ? 1 : 0
+  count         = var.enable_glue_etl ? 1 : 0
   name          = "trigger-start"
   type          = "ON_DEMAND"
   workflow_name = aws_glue_workflow.this[0].name
@@ -355,7 +368,7 @@ resource "aws_glue_trigger" "trigger_workflow" {
 }
 
 resource "aws_glue_trigger" "trigger-crawler" {
-  count         = var.enable_etl && var.enable_data_catalog ? 1 : 0
+  count         = var.enable_glue_etl ? 1 : 0
   name          = "trigger-crawler"
   type          = "CONDITIONAL"
   workflow_name = aws_glue_workflow.this[0].name
@@ -374,10 +387,10 @@ resource "aws_glue_trigger" "trigger-crawler" {
 
 ###### EMR Cluster ######
 resource "aws_emr_cluster" "this" {
-  count                             = var.enable_emr ? 1 : 0
-  name                              = "${var.name_prefix}-emr"
-  release_label                     = "emr-6.7.0"
-  applications                      = ["Hive"]
+  count                             = var.enable_emr_cluster ? 1 : 0
+  name                              = "${var.name_prefix}-emr-cluster"
+  release_label                     = var.emr_release_version
+  applications                      = var.emr_applications
   termination_protection            = false
   service_role                      = aws_iam_role.emr_service_role[0].arn
   keep_job_flow_alive_when_no_steps = true
@@ -395,21 +408,7 @@ resource "aws_emr_cluster" "this" {
     instance_count = 1
   }
 
-  core_instance_group {
-    instance_type  = "m3.xlarge"
-    instance_count = 2
-  }
-
-  configurations_json = <<EOF
-[
-  {
-    "Classification": "hive-site",
-    "Properties": {
-      "hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
-    }
-  }
-]
-EOF
+  configurations_json = local.emr_configurations
 
   step {
     action_on_failure = "TERMINATE_CLUSTER"
@@ -421,16 +420,6 @@ EOF
     }
   }
 
-
-  #  step {
-  #    action_on_failure = "CONTINUE"
-  #    name              = "Python Spark App"
-  #    hadoop_jar_step {
-  #      jar  = "command-runner.jar"
-  #      args = ["spark-submit", "s3://${aws_s3_bucket.this.bucket}/health_violations.py", "--data_source", "s3://${aws_s3_bucket.this.bucket}/food_establishment_data.csv", "--output_uri", "s3://${aws_s3_bucket.this.bucket}/MyOutputFolder"]
-  #    }
-  #  }
-
   lifecycle {
     ignore_changes = [log_uri]
   }
@@ -438,13 +427,12 @@ EOF
 }
 
 data "http" "my_public_ip" {
-  count = var.enable_emr ? 1 : 0
+  count = var.enable_emr_cluster ? 1 : 0
   url   = "http://ipv4.icanhazip.com"
 }
 
-
 resource "aws_security_group" "emr_allow_my_access" {
-  count                  = var.enable_emr ? 1 : 0
+  count                  = var.enable_emr_cluster ? 1 : 0
   name                   = "emr-allow-my-ssh"
   description            = "Allow My Access"
   vpc_id                 = var.emr_vpc_id
@@ -474,7 +462,7 @@ resource "aws_security_group" "emr_allow_my_access" {
 }
 
 resource "aws_iam_role" "emr_service_role" {
-  count = var.enable_emr ? 1 : 0
+  count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
   name  = "${var.name_prefix}-emr-servicerole"
 
   assume_role_policy = <<EOF
@@ -495,7 +483,7 @@ EOF
 }
 
 resource "aws_iam_role_policy" "emr_service_policy" {
-  count = var.enable_emr ? 1 : 0
+  count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
   name  = "${var.name_prefix}-servicerole-policy"
   role  = aws_iam_role.emr_service_role[0].id
 
@@ -566,7 +554,7 @@ EOF
 }
 
 resource "aws_iam_role" "emr_instance_profile_role" {
-  count = var.enable_emr ? 1 : 0
+  count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
   name  = "iam_emr_profile_role"
 
   assume_role_policy = <<EOF
@@ -587,13 +575,256 @@ EOF
 }
 
 resource "aws_iam_instance_profile" "emr_instance_profile" {
-  count = var.enable_emr ? 1 : 0
+  count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
   name  = "emr_profile"
   role  = aws_iam_role.emr_instance_profile_role[0].name
 }
 
 resource "aws_iam_role_policy_attachment" "emr_instance_profile_policy" {
-  count      = var.enable_emr ? 1 : 0
+  count      = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
   role       = aws_iam_role.emr_instance_profile_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceforEC2Role"
+}
+
+###### Step Functions ######
+data "template_file" "hive_create_table" {
+  count    = var.enable_step_functions ? 1 : 0
+  template = file("${path.module}/04-hive-scripts/create-players-total-tweets-table.q")
+  vars = {
+    GLUE_DATABASE = aws_glue_catalog_database.this[0].name
+    GLUE_TABLE    = local.players_total_tweets_mentions_table
+  }
+}
+
+resource "aws_s3_object" "hive_create_table_script" {
+  count   = var.enable_step_functions ? 1 : 0
+  bucket  = aws_s3_bucket.assets.bucket
+  key     = "HiveScripts/create-players-total-tweets-table.q"
+  content = data.template_file.hive_create_table[0].rendered
+}
+
+data "template_file" "hive_query" {
+  count    = var.enable_step_functions ? 1 : 0
+  template = file("${path.module}/04-hive-scripts/players-total-tweets-query.q")
+  vars = {
+    GLUE_DATABASE = aws_glue_catalog_database.this[0].name
+    GLUE_TABLE    = local.players_total_tweets_mentions_table
+  }
+}
+
+resource "aws_s3_object" "hive_query" {
+  count   = var.enable_step_functions ? 1 : 0
+  bucket  = aws_s3_bucket.assets.bucket
+  key     = "HiveScripts/players-total-tweets-query.q"
+  content = data.template_file.hive_query[0].rendered
+}
+
+resource "aws_sfn_state_machine" "this" {
+  count    = var.enable_step_functions ? 1 : 0
+  name     = "${var.name_prefix}-etl"
+  role_arn = aws_iam_role.step_functions_role[0].arn
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.sfn[0].arn}:*"
+    include_execution_data = true
+    level                  = "ERROR"
+  }
+
+  definition = <<EOF
+{
+  "Comment": "State Machine to calculate the Total Twitters By Athlete",
+  "StartAt": "EMR CreateCluster",
+  "States": {
+
+    "EMR CreateCluster": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::elasticmapreduce:createCluster.sync",
+    "Parameters": {
+      "Name": "${var.name_prefix}-emr-cluster",
+      "ServiceRole": "${aws_iam_role.emr_service_role[0].arn}",
+      "JobFlowRole": "${aws_iam_instance_profile.emr_instance_profile[0].arn}",
+      "ReleaseLabel": "${var.emr_release_version}",
+      "Applications": ${local.states_emr_applications},
+      "LogUri": "${local.emr_s3_logs_uri}",
+      "VisibleToAllUsers": true,
+      "Configurations": ${local.emr_configurations},
+      "Instances": {
+        "KeepJobFlowAliveWhenNoSteps": true,
+        "InstanceFleets": [
+          {
+            "InstanceFleetType": "MASTER",
+            "Name": "Master",
+            "TargetOnDemandCapacity": 1,
+            "InstanceTypeConfigs": [
+              {
+                "InstanceType": "m3.xlarge"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ResultPath": "$.CreateClusterResult",
+    "Next": "GetTable",
+    "Catch": [
+      {
+        "ErrorEquals": [
+          "States.ALL"
+        ],
+        "Comment": "All",
+        "Next": "Fail"
+      }
+    ]
+  },
+
+    "Fail": {
+      "Type": "Fail"
+    },
+
+    "GetTable": {
+      "Type": "Task",
+      "Next": "EMR Run Query",
+      "Parameters": {
+        "DatabaseName": "${aws_glue_catalog_database.this[0].name}",
+        "Name": "${local.players_total_tweets_mentions_table}"
+       },
+      "Resource": "arn:aws:states:::aws-sdk:glue:getTable",
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Comment": "All Errors",
+          "ResultPath": null,
+          "Next": "EMR Create Table"
+        }
+      ]
+    },
+
+    "EMR Create Table": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
+      "Parameters": {
+        "ClusterId.$": "$.CreateClusterResult.Cluster.Id",
+        "Step": {
+          "Name": "HiveCreateTable",
+          "ActionOnFailure": "TERMINATE_CLUSTER",
+          "HadoopJarStep": {
+            "Jar": "command-runner.jar",
+            "Args": [
+                "hive-script",
+                "--run-hive-script",
+                "--args",
+                "-f",
+                "s3://${aws_s3_object.hive_create_table_script[0].bucket}/${aws_s3_object.hive_create_table_script[0].key}",
+                "-d",
+                "INPUT=s3://${aws_s3_bucket.dataLake.bucket}/${local.players_total_tweets_mentions_table}"
+              ]
+          }
+        }
+      },
+      "Next": "EMR Run Query",
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "EMR TerminateCluster",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+
+  "EMR Run Query": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
+    "Parameters": {
+      "ClusterId.$": "$.CreateClusterResult.Cluster.Id",
+      "Step": {
+        "Name": "HiveRunQuery",
+        "ActionOnFailure": "TERMINATE_CLUSTER",
+        "HadoopJarStep": {
+          "Jar": "command-runner.jar",
+          "Args.$": "States.Array('hive-script', '--run-hive-script', '--args', '-f', 's3://${aws_s3_object.hive_query[0].bucket}/${aws_s3_object.hive_query[0].key}', '-d', States.Format('YEAR={}', $.Year), '-d', States.Format('MONTH={}', $.Month), '-d', States.Format('DAY={}', $.Day))"
+          }
+        }
+       },
+      "Next": "EMR TerminateCluster",
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "EMR TerminateCluster",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+
+    "EMR TerminateCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::elasticmapreduce:terminateCluster.sync",
+      "Parameters": {
+        "ClusterId.$": "$.CreateClusterResult.Cluster.Id"
+      },
+      "Next": "Success"
+    },
+
+   "Success": {
+      "Type": "Succeed"
+    }
+  }
+}
+EOF
+}
+
+resource "aws_iam_role" "step_functions_role" {
+  count = var.enable_step_functions ? 1 : 0
+  name  = "${var.name_prefix}-step-functions-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2008-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "states.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy" "step_functions_policy" {
+  count = var.enable_step_functions ? 1 : 0
+  name  = "${var.name_prefix}-stepfunctions-policy"
+  role  = aws_iam_role.step_functions_role[0].id
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Resource": "*",
+        "Action": [
+            "glue:*",
+            "logs:*",
+            "elasticmapreduce:*",
+            "iam:PassRole"
+        ]
+    }]
+}
+EOF
+}
+
+resource "aws_cloudwatch_log_group" "sfn" {
+  count = var.enable_step_functions ? 1 : 0
+  name  = "${var.name_prefix}-state-machine-log"
 }
