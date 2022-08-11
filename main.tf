@@ -16,6 +16,9 @@ locals {
   }
 ]
 EOF
+
+  redshift_data_pipeline_input_s3 = var.enable_redshift ? "s3://${aws_s3_bucket.dataLake.bucket}/${local.players_total_tweets_mentions_table}/" : null
+
 }
 
 ###### S3 ######
@@ -272,15 +275,14 @@ EOF
 }
 
 ###### Data Catalog ######
-resource "aws_glue_catalog_database" "this" { # TODO Should be always created. Remove enable_data_catalog variable
-  count      = var.enable_data_catalog || var.enable_glue_etl || var.enable_step_functions ? 1 : 0
+resource "aws_glue_catalog_database" "this" {
   catalog_id = data.aws_caller_identity.this.id
   name       = replace("${var.name_prefix}-db", "-", "_")
 }
 
 resource "aws_glue_crawler" "this" {
-  count         = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
-  database_name = aws_glue_catalog_database.this[0].name
+  count         = var.enable_glue_etl ? 1 : 0
+  database_name = aws_glue_catalog_database.this.name
   name          = "${var.name_prefix}-crawler"
   role          = aws_iam_role.glue_crawler_role[0].arn
 
@@ -300,7 +302,7 @@ resource "aws_glue_crawler" "this" {
 }
 
 resource "aws_iam_role" "glue_crawler_role" {
-  count = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
+  count = var.enable_glue_etl ? 1 : 0
   name  = "${var.name_prefix}-glue-crawler-role"
 
   assume_role_policy = <<EOF
@@ -321,7 +323,7 @@ EOF
 }
 
 resource "aws_iam_role_policy" "glue_crawler_s3" {
-  count  = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
+  count  = var.enable_glue_etl ? 1 : 0
   name   = "s3"
   role   = aws_iam_role.glue_crawler_role[0].id
   policy = <<EOF
@@ -344,8 +346,8 @@ resource "aws_iam_role_policy" "glue_crawler_s3" {
 EOF
 }
 
-resource "aws_iam_role_policy_attachment" "glue_service_policy" {
-  count      = var.enable_data_catalog || var.enable_glue_etl ? 1 : 0
+resource "aws_iam_role_policy_attachment" "glue_crawler_service_policy" {
+  count      = var.enable_glue_etl ? 1 : 0
   role       = aws_iam_role.glue_crawler_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
 }
@@ -553,9 +555,9 @@ resource "aws_iam_role_policy" "emr_service_policy" {
 EOF
 }
 
-resource "aws_iam_role" "emr_instance_profile_role" {
+resource "aws_iam_role" "emr_ec2_role" {
   count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
-  name  = "iam_emr_profile_role"
+  name  = "${var.name_prefix}-emr-ec2-role"
 
   assume_role_policy = <<EOF
 {
@@ -576,13 +578,13 @@ EOF
 
 resource "aws_iam_instance_profile" "emr_instance_profile" {
   count = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
-  name  = "emr_profile"
-  role  = aws_iam_role.emr_instance_profile_role[0].name
+  name  = "${var.name_prefix}-emr-ec2-instance-profile"
+  role  = aws_iam_role.emr_ec2_role[0].name
 }
 
 resource "aws_iam_role_policy_attachment" "emr_instance_profile_policy" {
   count      = var.enable_emr_cluster || var.enable_step_functions ? 1 : 0
-  role       = aws_iam_role.emr_instance_profile_role[0].name
+  role       = aws_iam_role.emr_ec2_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceforEC2Role"
 }
 
@@ -591,7 +593,7 @@ data "template_file" "hive_create_table" {
   count    = var.enable_step_functions ? 1 : 0
   template = file("${path.module}/04-hive-scripts/create-players-total-tweets-table.q")
   vars = {
-    GLUE_DATABASE = aws_glue_catalog_database.this[0].name
+    GLUE_DATABASE = aws_glue_catalog_database.this.name
     GLUE_TABLE    = local.players_total_tweets_mentions_table
   }
 }
@@ -607,7 +609,7 @@ data "template_file" "hive_query" {
   count    = var.enable_step_functions ? 1 : 0
   template = file("${path.module}/04-hive-scripts/players-total-tweets-query.q")
   vars = {
-    GLUE_DATABASE = aws_glue_catalog_database.this[0].name
+    GLUE_DATABASE = aws_glue_catalog_database.this.name
     GLUE_TABLE    = local.players_total_tweets_mentions_table
   }
 }
@@ -685,7 +687,7 @@ resource "aws_sfn_state_machine" "this" {
       "Type": "Task",
       "Next": "EMR Run Query",
       "Parameters": {
-        "DatabaseName": "${aws_glue_catalog_database.this[0].name}",
+        "DatabaseName": "${aws_glue_catalog_database.this.name}",
         "Name": "${local.players_total_tweets_mentions_table}"
        },
       "Resource": "arn:aws:states:::aws-sdk:glue:getTable",
@@ -827,4 +829,446 @@ EOF
 resource "aws_cloudwatch_log_group" "sfn" {
   count = var.enable_step_functions ? 1 : 0
   name  = "${var.name_prefix}-state-machine-log"
+}
+
+###### Redshift ######
+resource "aws_redshift_cluster" "this" {
+  count               = var.enable_redshift ? 1 : 0
+  cluster_identifier  = "${var.name_prefix}-cluster"
+  database_name       = "twitter"
+  master_username     = var.redshift_username
+  master_password     = var.redshift_password
+  node_type           = "dc2.large"
+  cluster_type        = "single-node"
+  skip_final_snapshot = true
+  iam_roles           = [aws_iam_role.redshift_s3_role[0].arn]
+}
+
+resource "aws_iam_role" "redshift_s3_role" {
+  count = var.enable_redshift ? 1 : 0
+  name  = "${var.name_prefix}-redshift-s3-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2008-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "redshift.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "redshift_s3_policy" {
+  count      = var.enable_redshift ? 1 : 0
+  role       = aws_iam_role.redshift_s3_role[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+}
+
+resource "aws_datapipeline_pipeline" "this" {
+  count       = var.enable_redshift ? 1 : 0
+  name        = "${var.name_prefix}-data-pipeline"
+  description = "Data Pipeline to move data from S3 to Redshift"
+}
+
+resource "aws_datapipeline_pipeline_definition" "this" {
+  count       = var.enable_redshift ? 1 : 0
+  pipeline_id = aws_datapipeline_pipeline.this[0].id
+  pipeline_object {
+    id   = "Default"
+    name = "Default"
+    field {
+      key          = "scheduleType"
+      string_value = "ONDEMAND"
+    }
+    field {
+      key          = "pipelineLogUri"
+      string_value = "s3://${aws_s3_bucket.assets.bucket}/data-pipeline"
+    }
+    field {
+      key          = "role"
+      string_value = aws_iam_role.data_pipeline_role[0].name
+    }
+    field {
+      key          = "resourceRole"
+      string_value = aws_iam_instance_profile.data_pipeline_ec2_instance_profile[0].name
+    }
+    field {
+      key          = "failureAndRerunMode"
+      string_value = "CASCADE"
+    }
+  }
+  pipeline_object {
+    id   = "RedshiftCluster"
+    name = "RedshiftCluster"
+    field {
+      key          = "type"
+      string_value = "RedshiftDatabase"
+    }
+    field {
+      key          = "username"
+      string_value = "#{myRedshiftUsername}"
+    }
+    field {
+      key          = "*password"
+      string_value = "#{*myRedshiftPassword}"
+    }
+    field {
+      key          = "databaseName"
+      string_value = "#{myRedshiftJdbcConnectStr}"
+    }
+    field {
+      key          = "connectionString"
+      string_value = "#{myRedshiftJdbcConnectStr}"
+    }
+  }
+  pipeline_object {
+    id   = "Ec2Instance"
+    name = "Ec2Instance"
+    field {
+      key          = "type"
+      string_value = "Ec2Resource"
+    }
+    field {
+      key          = "instanceType"
+      string_value = "t1.micro"
+    }
+    field {
+      key          = "terminateAfter"
+      string_value = "1 Hour"
+    }
+    field {
+      key          = "securityGroups"
+      string_value = "#{myRedshiftSecurityGrps}"
+    }
+  }
+  pipeline_object {
+    id   = "DestRedshiftTable"
+    name = "DestRedshiftTable"
+    field {
+      key          = "type"
+      string_value = "RedshiftDataNode"
+    }
+    field {
+      key          = "tableName"
+      string_value = "#{myRedshiftTableName}"
+    }
+    field {
+      key          = "createTableSql"
+      string_value = "#{myRedshiftCreateTableSql}"
+    }
+    field {
+      key       = "database"
+      ref_value = "RedshiftCluster"
+    }
+  }
+  pipeline_object {
+    id   = "S3InputDataNode"
+    name = "S3InputDataNode"
+    field {
+      key          = "type"
+      string_value = "S3DataNode"
+    }
+    field {
+      key          = "directoryPath"
+      string_value = "#{myInputS3Loc}"
+    }
+  }
+  pipeline_object {
+    id   = "RedshiftLoadActivity"
+    name = "RedshiftLoadActivity"
+    field {
+      key          = "type"
+      string_value = "RedshiftCopyActivity"
+    }
+    field {
+      key          = "insertMode"
+      string_value = "#{myInsertMode}"
+    }
+    field {
+      key       = "runsOn"
+      ref_value = "Ec2Instance"
+    }
+    field {
+      key       = "input"
+      ref_value = "S3InputDataNode"
+    }
+    field {
+      key       = "output"
+      ref_value = "DestRedshiftTable"
+    }
+    field {
+      key          = "commandOptions"
+      string_value = "FORMAT AS JSON 'auto'"
+    }
+  }
+  parameter_object {
+    id = "*myRedshiftPassword"
+    attribute {
+      key          = "description"
+      string_value = "Redshift password"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftDbName"
+    attribute {
+      key          = "description"
+      string_value = "Redshift database name"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftSecurityGrps"
+    attribute {
+      key          = "description"
+      string_value = "Redshift security group(s)"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+    attribute {
+      key          = "isArray"
+      string_value = "true"
+    }
+    attribute {
+      key          = "helpText"
+      string_value = "The names of one or more security groups that are assigned to the Redshift cluster."
+    }
+    attribute {
+      key          = "watermark"
+      string_value = "security group name"
+    }
+    attribute {
+      key          = "default"
+      string_value = "default"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftUsername"
+    attribute {
+      key          = "description"
+      string_value = "Redshift username"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftCreateTableSql"
+    attribute {
+      key          = "description"
+      string_value = "Create table SQL query"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+    attribute {
+      key          = "optional"
+      string_value = "true"
+    }
+    attribute {
+      key          = "helpText"
+      string_value = "The SQL statement to create the Redshift table if it does not already exist."
+    }
+    attribute {
+      key          = "watermark"
+      string_value = "CREATE TABLE IF NOT EXISTS #{tableName} (id varchar(255), name varchar(255), address varchar(255), primary key(id)) distkey(id) sortkey(id);"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftTableName"
+    attribute {
+      key          = "description"
+      string_value = "Redshift table name"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+  }
+  parameter_object {
+    id = "myInputS3Loc"
+    attribute {
+      key          = "description"
+      string_value = "Input S3 folder"
+    }
+    attribute {
+      key          = "type"
+      string_value = "AWS::S3::ObjectKey"
+    }
+  }
+  parameter_object {
+    id = "myRedshiftJdbcConnectStr"
+    attribute {
+      key          = "description"
+      string_value = "Redshift JDBC connection string"
+    }
+    attribute {
+      key          = "type"
+      string_value = "string"
+    }
+  }
+  parameter_object {
+    id = "myInsertMode"
+    attribute {
+      key          = "description"
+      string_value = "Table insert mode"
+    }
+    attribute {
+      key          = "type"
+      string_value = "String"
+    }
+    attribute {
+      key          = "default"
+      string_value = "OVERWRITE_EXISTING"
+    }
+  }
+  parameter_value {
+    id           = "myRedshiftUsername"
+    string_value = aws_redshift_cluster.this[0].master_username
+  }
+  parameter_value {
+    id           = "myRedshiftCreateTableSql"
+    string_value = "CREATE TABLE IF NOT EXISTS playerstotaltweets(year integer not null, month integer not null, day integer not null, player varchar(255) not null, total integer not null);"
+  }
+  parameter_value {
+    id           = "myRedshiftDbName"
+    string_value = aws_redshift_cluster.this[0].database_name
+  }
+  parameter_value {
+    id           = "myRedshiftJdbcConnectStr"
+    string_value = "jbdc:postgresql://${aws_redshift_cluster.this[0].endpoint}/${aws_redshift_cluster.this[0].database_name}?tcpKeepAlive=true"
+  }
+  parameter_value {
+    id           = "*myRedshiftPassword"
+    string_value = aws_redshift_cluster.this[0].master_password
+  }
+  parameter_value {
+    id           = "myInsertMode"
+    string_value = "TRUNCATE"
+  }
+  parameter_value {
+    id           = "myRedshiftSecurityGrps"
+    string_value = "default"
+  }
+  parameter_value {
+    id           = "myRedshiftTableName"
+    string_value = "playerstotaltweets"
+  }
+  parameter_value {
+    id           = "myInputS3Loc"
+    string_value = local.redshift_data_pipeline_input_s3
+  }
+}
+
+resource "aws_iam_role" "data_pipeline_role" {
+  count = var.enable_redshift ? 1 : 0
+  name  = "${var.name_prefix}-data-pipeline-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2008-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "datapipeline.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy" "data_pipeline_policy" {
+  count  = var.enable_redshift ? 1 : 0
+  name   = "${var.name_prefix}-data-pipeline-policy"
+  role   = aws_iam_role.data_pipeline_role[0].id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Resource": "*",
+        "Action": [
+            "s3:*",
+            "ec2:*",
+            "iam:*"
+        ]
+    }]
+}
+EOF
+}
+
+resource "aws_iam_role" "data_pipeline_ec2_role" {
+  count = var.enable_redshift ? 1 : 0
+  name  = "${var.name_prefix}-datapipeline-ec2-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2008-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_instance_profile" "data_pipeline_ec2_instance_profile" {
+  count = var.enable_redshift ? 1 : 0
+  name  = "${var.name_prefix}-datapipeline-ec2-instance-profile"
+  role  = aws_iam_role.data_pipeline_ec2_role[0].name
+}
+
+resource "aws_iam_role_policy" "data_pipeline_ec2_policy" {
+  count  = var.enable_redshift ? 1 : 0
+  name   = "${var.name_prefix}-data-pipeline-ec2-policy"
+  role   = aws_iam_role.data_pipeline_ec2_role[0].id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Resource": "*",
+        "Action": [
+            "s3:*",
+            "cloudwatch:*",
+            "datapipeline:*",
+            "ec2:*",
+            "dynamodb:*",
+            "elasticmapreduce:*",
+            "rds:*",
+            "redshift:*",
+            "sdb:*",
+            "sns:*",
+            "sqs:*"
+        ]
+    }]
+}
+EOF
 }

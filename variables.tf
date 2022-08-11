@@ -15,12 +15,6 @@ variable "enable_data_collection" {
   description = "Set it to false to disable process related with data collection (Kinesis Firehose)"
 }
 
-variable "enable_data_catalog" {
-  type        = bool
-  default     = true
-  description = "Set it to false to disable process related with data catalog (Glue Catalog & Glue Crawler)"
-}
-
 variable "enable_glue_etl" {
   type        = bool
   default     = true
@@ -39,17 +33,26 @@ variable "enable_step_functions" {
   description = "Set it to false to disable step functions creation"
 }
 
+variable "enable_redshift" {
+  type        = bool
+  default     = true
+  description = "Set it to false to disable redshift"
+}
+
 ### EMR ###
 variable "emr_vpc_id" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "emr_subnet_id" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "key_pair_name" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "emr_applications" {
@@ -81,4 +84,16 @@ variable "glue_crawl_recrawl_behavior" {
     condition     = contains(["CRAWL_EVENT_MODE", "CRAWL_EVERYTHING", "CRAWL_NEW_FOLDERS_ONLY"], var.glue_crawl_recrawl_behavior)
     error_message = "Valid values for var: glue_crawl_recrawl_behavior are (CRAWL_EVENT_MODE, CRAWL_EVERYTHING, CRAWL_NEW_FOLDERS_ONLY)."
   }
+}
+
+### Redshift ###
+variable "redshift_username" {
+  type    = string
+  default = null
+}
+
+variable "redshift_password" {
+  type      = string
+  sensitive = true
+  default   = null
 }

@@ -3,6 +3,7 @@ DROP_DUPLICATES_JOB = $(shell terraform output -json | jq -r .glue_drop_duplicat
 GLUE_WORKFLOW = $(shell terraform output -json | jq -r .glue_workflow.value)
 EMR_PUBLIC_DNS = $(shell terraform output -json | jq -r .emr_public_dns.value)
 STATE_MACHINE_ARN = $(shell terraform output -json | jq -r .state_machine_arn.value)
+PIPELINE_ID = $(shell terraform output -json | jq -r .redshift_pipeline_id.value)
 
 define setup_collection_env
 	$(eval ENV_FILE := 01-data-collection-app/.env)
@@ -26,6 +27,9 @@ run-crawler:
 
 run-step-function:
 	aws stepfunctions start-execution --state-machine-arn $(STATE_MACHINE_ARN) --input "{\"Year\" : \"$(STATE_MACHINE_RUN_YEAR)\", \"Month\" : \"$(STATE_MACHINE_RUN_MONTH)\", \"Day\" : \"$(STATE_MACHINE_RUN_DAY)\"}"
+
+run-data-pipeline:
+	aws datapipeline activate-pipeline --pipeline-id $(PIPELINE_ID)
 
 ssh-emr:
 	ssh -i $(EMR_KEY) hadoop@$(EMR_PUBLIC_DNS)

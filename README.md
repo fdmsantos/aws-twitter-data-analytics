@@ -20,7 +20,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 
 **Data Source**
 
-[Twitter](https://twitter.com/)
+* [Twitter](https://twitter.com/)
 
 **Deployment**
 
@@ -42,6 +42,8 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 * [GLUE - Catalog, Crawler, Job, Workflow](https://aws.amazon.com/glue/)
 * [Elastic Map Reduce](https://aws.amazon.com/emr/)
 * [Step Functions](https://aws.amazon.com/step-functions/)
+* [Redshift](https://aws.amazon.com/redshift/)
+* [Data Pipeline](https://aws.amazon.com/datapipeline/)
 
 ### Components:
 
@@ -66,7 +68,16 @@ An EMR Cluster is created to do some tests. The EMR Cluster is created with Hive
 
 ![Diagram](Stepfunction.png)
 
-The state machine creates EMR Cluster to run hive scripts. The hive script result is stored in S3 via a created external table.
+The state machine creates EMR Cluster to run hive scripts. The hive script result is stored in S3 via an external table.
+
+**Redshift**
+
+This component creates a redshift cluster and AWS Data Pipeline.
+The Data pipeline loads the data resulting from hive queries stored in S3 to a redshift table.
+
+* Data Pipeline diagram
+
+![DataPipeline](DataPipeline.png)
 
 ## Getting Started
 
@@ -100,7 +111,7 @@ Execute the following command to run go app:
 make run-collection
 ```
 
-## Glue ETL
+### Glue ETL
 
 **Pre Requisites:** 
 
@@ -126,7 +137,7 @@ Execute the following command to Run Glue Workflow
 make run-glue-workflow
 ```
 
-## EMR Cluster
+### EMR Cluster
 
 You can disable the emr cluster creation by changing terraform variable `enable_emr_cluster` to false.
 
@@ -136,7 +147,7 @@ To do ssh to emr cluster run the following command:
 make EMR_KEY=<key_location> ssh-emr
 ```
 
-## Step Functions
+### Step Functions
 
 You can disable the step function creation by changing terraform variable `enable_step_functions` to false.
 
@@ -144,6 +155,35 @@ To run the state machine run the following command:
 
 ```shell
 make STATE_MACHINE_RUN_YEAR=2022 STATE_MACHINE_RUN_MONTH=08 STATE_MACHINE_RUN_DAY=09 run-step-function 
+```
+
+### Redshift
+
+You can disable redshift and aws data pipeline creation by changing terraform variable `enable_redshift` to false.
+
+To run the data pipeline run the following command:
+
+```shell
+make run-data-pipeline
+```
+
+* Run Process Manual (Without AWs Data pipeline)
+  * To get `s3_input_dir`, run : `terraform output -json | jq -r .redshift_pipeline_input_s3.value`
+  * To get `redshift_role`, run: `terraform output -json | jq -r .redshift_s3_role_arn.value`
+
+```sql
+create table playerstotaltweets(
+year integer not null,
+month integer not null,
+day integer not null,
+player varchar(255) not null,
+total integer not null);
+
+COPY twitter.public.playerstotaltweets
+  FROM '<s3_input_dir>'
+  IAM_ROLE '<redshift_role>'
+  FORMAT AS JSON 'auto'
+  REGION AS '<region>';
 ```
 
 ## Useful Links
@@ -156,23 +196,12 @@ make STATE_MACHINE_RUN_YEAR=2022 STATE_MACHINE_RUN_MONTH=08 STATE_MACHINE_RUN_DA
 
 * Data Collection App
   * Create Docker File
-  * Deploy on ECS
+* Glue
+  * Glue DataBrew
 * Firehose
   * Enable Comprehension 
   * Enable File Format Conversion to Parquet/ORC
-* Athena Query
-```sql
-SELECT context.entity.name, count(*)
-FROM twitter_nba_db.tweets, UNNEST(context_annotations) t(context)
-WHERE context.domain.id = '60'
-GROUP BY context.entity.name, year, month, day
-HAVING year = '2022'
-AND month = '08'
-AND day = '10'
-```
-* Redshift
-  * Load output from S3 to Redshift Using data Pipeline
-[Link](https://docs.aws.amazon.com/datapipeline/latest/DeveloperGuide/dp-copydata-redshift-cli.html)
+* Redshift Spectrum
 * Quicksight
   * Percentil Graph
   * Regional Graph
@@ -187,3 +216,18 @@ AND day = '10'
     * https://docs.aws.amazon.com/kinesisanalytics/latest/dev/windowed-sql.html
   * Use Reference data in dynamo with players and team and do tampering by team and also enhanced data with team
 * Data Profiling Solution [Link](https://aws.amazon.com/blogs/big-data/build-an-automatic-data-profiling-and-reporting-solution-with-amazon-emr-aws-glue-and-amazon-quicksight/)
+
+
+## Other Resources
+
+* Athena Query
+
+```sql
+SELECT context.entity.name, count(*)
+FROM twitter_nba_db.tweets, UNNEST(context_annotations) t(context)
+WHERE context.domain.id = '60'
+GROUP BY context.entity.name, year, month, day
+HAVING year = '2022'
+AND month = '08'
+AND day = '10'
+```
