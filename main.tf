@@ -1272,3 +1272,49 @@ resource "aws_iam_role_policy" "data_pipeline_ec2_policy" {
 }
 EOF
 }
+
+### Quicksight ###
+resource "aws_quicksight_data_source" "redshift" {
+  count = var.enable_quicksight ? 1 : 0
+  data_source_id = "${var.name_prefix}-redshift"
+  name           = local.players_total_tweets_mentions_table
+  type = "REDSHIFT"
+  aws_account_id = data.aws_caller_identity.this.id
+
+  credentials {
+    credential_pair {
+      username = aws_redshift_cluster.this[0].master_username
+      password = aws_redshift_cluster.this[0].master_password
+    }
+  }
+
+  permission {
+    actions   = [
+      "quicksight:UpdateDataSourcePermissions",
+      "quicksight:DescribeDataSourcePermissions",
+      "quicksight:PassDataSource",
+      "quicksight:DescribeDataSource",
+      "quicksight:DeleteDataSource",
+      "quicksight:UpdateDataSource"
+    ]
+    principal = var.quicksight_user_arn
+  }
+
+  parameters {
+    redshift {
+      cluster_id = aws_redshift_cluster.this[0].id
+      database = aws_redshift_cluster.this[0].database_name
+    }
+  }
+
+  ssl_properties {
+    disable_ssl = false
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.enable_redshift
+      error_message = "Redshift Component must be enabled."
+    }
+  }
+}

@@ -39,6 +39,12 @@ variable "enable_redshift" {
   description = "Set it to false to disable redshift"
 }
 
+variable "enable_quicksight" {
+  type = string
+  default = true
+  description = "Set it to false to disable quicksight"
+}
+
 ### EMR ###
 variable "emr_vpc_id" {
   type    = string
@@ -70,7 +76,7 @@ variable "emr_release_version" {
 ### Glue ###
 variable "glue_jobs_bookmark" {
   type    = string
-  default = "job-bookmark-enable"
+  default = "job-bookmark-disable"
   validation {
     condition     = contains(["job-bookmark-enable", "job-bookmark-disable", "job-bookmark-pause"], var.glue_jobs_bookmark)
     error_message = "Valid values for var: glue_jobs_bookmark are (job-bookmark-enable, job-bookmark-disable, job-bookmark-pause)."
@@ -96,4 +102,10 @@ variable "redshift_password" {
   type      = string
   sensitive = true
   default   = null
+}
+
+### Quicksight ###
+variable "quicksight_user_arn" {
+  type = string
+  default = null
 }

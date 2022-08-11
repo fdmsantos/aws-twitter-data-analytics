@@ -79,6 +79,12 @@ The Data pipeline loads the data resulting from hive queries stored in S3 to a r
 
 ![DataPipeline](DataPipeline.png)
 
+### Quicksight
+
+AWS Data Visualisation tool 
+
+![NBA Players Related Tweets](Quicksight1.png)
+
 ## Getting Started
 
 ### Deploy
@@ -149,7 +155,7 @@ make EMR_KEY=<key_location> ssh-emr
 
 ### Step Functions
 
-You can disable the step function creation by changing terraform variable `enable_step_functions` to false.
+You can disable step function creation by changing terraform variable `enable_step_functions` to false.
 
 To run the state machine run the following command:
 
@@ -186,6 +192,15 @@ COPY twitter.public.playerstotaltweets
   REGION AS '<region>';
 ```
 
+### Quicksight
+
+**Pre Requisites:**
+
+You can disable quicksight creation by changing terraform variable `enable_quicksight` to false.
+
+* Quicksight Account and User
+  * To get your user arn, run : `aws quicksight list-users --region <region> --aws-account-id <account_id> --namespace default`
+  
 ## Useful Links
 
 [NBA Players Twitter Accounts](https://www.basketball-reference.com/friv/twitter.html)
