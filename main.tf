@@ -1,4 +1,5 @@
 data "aws_caller_identity" "this" {}
+data "aws_region" "current" {}
 
 locals {
   raw_data_location_prefix            = "raw"
@@ -65,7 +66,6 @@ module "firehose_lambda_transformation" {
   timeout                           = 900
   cloudwatch_logs_retention_in_days = 5
   attach_policy_json                = false
-
 }
 
 resource "aws_iam_role" "firehose_role" {
@@ -1275,10 +1275,10 @@ EOF
 
 ### Quicksight ###
 resource "aws_quicksight_data_source" "redshift" {
-  count = var.enable_quicksight ? 1 : 0
+  count          = var.enable_quicksight ? 1 : 0
   data_source_id = "${var.name_prefix}-redshift"
   name           = local.players_total_tweets_mentions_table
-  type = "REDSHIFT"
+  type           = "REDSHIFT"
   aws_account_id = data.aws_caller_identity.this.id
 
   credentials {
@@ -1289,7 +1289,7 @@ resource "aws_quicksight_data_source" "redshift" {
   }
 
   permission {
-    actions   = [
+    actions = [
       "quicksight:UpdateDataSourcePermissions",
       "quicksight:DescribeDataSourcePermissions",
       "quicksight:PassDataSource",
@@ -1303,7 +1303,7 @@ resource "aws_quicksight_data_source" "redshift" {
   parameters {
     redshift {
       cluster_id = aws_redshift_cluster.this[0].id
-      database = aws_redshift_cluster.this[0].database_name
+      database   = aws_redshift_cluster.this[0].database_name
     }
   }
 
@@ -1317,4 +1317,260 @@ resource "aws_quicksight_data_source" "redshift" {
       error_message = "Redshift Component must be enabled."
     }
   }
+}
+
+### Kinesis Data Analytics ###
+resource "aws_s3_object" "flink" {
+  count  = var.enable_kinesis_data_analytics ? 1 : 0
+  bucket = aws_s3_bucket.assets.bucket
+  key    = "FlinkScripts/flink.zip"
+  source = "${path.module}/Flink.zip"
+}
+
+#resource "aws_s3_object" "reference_data" {
+#  count  = var.enable_kinesis_data_analytics ? 1 : 0
+#  bucket = aws_s3_bucket.assets.bucket
+#  key    = "FlinkScripts/nba-players-tweet-accounts.csv"
+#  source = "${path.module}/05-flink/nba-players-tweet-accounts.csv"
+#}
+
+resource "aws_kinesis_stream" "nba_tampering" {
+  count            = var.enable_kinesis_data_analytics ? 1 : 0
+  name             = "${var.name_prefix}-nba-tampering-source"
+  shard_count      = 1
+  retention_period = 48
+
+  shard_level_metrics = [
+    "IncomingBytes",
+    "OutgoingBytes",
+  ]
+
+  stream_mode_details {
+    stream_mode = "PROVISIONED"
+  }
+}
+
+resource "aws_kinesis_stream" "nba_tampering_output" {
+  count            = var.enable_kinesis_data_analytics ? 1 : 0
+  name             = "${var.name_prefix}-nba-tampering-output"
+  shard_count      = 1
+  retention_period = 48
+
+  shard_level_metrics = [
+    "IncomingBytes",
+    "OutgoingBytes",
+  ]
+
+  stream_mode_details {
+    stream_mode = "PROVISIONED"
+  }
+}
+
+resource "aws_sns_topic" "nba_tampering" {
+  count = var.enable_kinesis_data_analytics ? 1 : 0
+  name  = "${var.name_prefix}-nba-tampering-notification"
+}
+
+resource "aws_sns_topic_subscription" "nba_tampering" {
+  count     = var.enable_kinesis_data_analytics ? 1 : 0
+  topic_arn = aws_sns_topic.nba_tampering[0].arn
+  protocol  = "email"
+  endpoint  = var.my_email
+}
+
+module "lambda_nba_tampering" {
+  count                                   = var.enable_kinesis_data_analytics ? 1 : 0
+  source                                  = "terraform-aws-modules/lambda/aws"
+  function_name                           = "${var.name_prefix}-nba-tampering-notify"
+  description                             = "Lambda to notify nba tampering"
+  handler                                 = "index.lambda_handler"
+  runtime                                 = "python3.8"
+  docker_image                            = "public.ecr.aws/j9c7g0r1/lambda_python:latest"
+  source_path                             = "${path.module}/06-notify-nba-tampering-lambda"
+  recreate_missing_package                = true
+  ignore_source_code_hash                 = true
+  build_in_docker                         = true
+  docker_pip_cache                        = true
+  memory_size                             = 512
+  timeout                                 = 900
+  cloudwatch_logs_retention_in_days       = 5
+  create_current_version_allowed_triggers = false
+  environment_variables = {
+    TOPIC_ARN = aws_sns_topic.nba_tampering[0].arn
+  }
+  event_source_mapping = {
+    kinesis = {
+      event_source_arn                   = aws_kinesis_stream.nba_tampering_output[0].arn
+      starting_position                  = "LATEST"
+      maximum_batching_window_in_seconds = 5
+      batch_size                         = 100
+    }
+  }
+  allowed_triggers = {
+    kinesis = {
+      principal  = "kinesis.amazonaws.com"
+      source_arn = aws_kinesis_stream.nba_tampering_output[0].arn
+    }
+  }
+  attach_policy_json = true
+  policy_json        = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:*"
+            ],
+            "Resource": ["*"]
+        }
+    ]
+}
+EOF
+  attach_policies    = true
+  number_of_policies = 1
+  policies = [
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole",
+  ]
+}
+
+resource "aws_kinesisanalyticsv2_application" "this" {
+  count                  = var.enable_kinesis_data_analytics ? 1 : 0
+  name                   = "${var.name_prefix}-analytics"
+  runtime_environment    = "FLINK-1_13"
+  service_execution_role = aws_iam_role.analytics[0].arn
+  start_application      = true
+
+  application_configuration {
+    application_code_configuration {
+      code_content {
+        s3_content_location {
+          bucket_arn = aws_s3_bucket.assets.arn
+          file_key   = aws_s3_object.flink[0].key
+        }
+      }
+
+      code_content_type = "ZIPFILE"
+    }
+
+    environment_properties {
+      property_group {
+        property_group_id = "kinesis.analytics.flink.run.options"
+
+        property_map = {
+          python  = "05-flink/nba-tampering.py"
+          jarfile = "05-flink/lib/flink-sql-connector-kinesis_2.12-1.13.6.jar"
+        }
+      }
+
+      #      property_group {
+      #        property_group_id = "reference.config.0"
+      #
+      #        property_map = {
+      #          "s3.bucket.name" = aws_s3_object.reference_data[0].bucket
+      #          "s3.bucket.file" = aws_s3_object.reference_data[0].key
+      #        }
+      #      }
+
+      property_group {
+        property_group_id = "consumer.config.0"
+
+        property_map = {
+          "input.stream.name"    = aws_kinesis_stream.nba_tampering[0].name
+          "flink.stream.initpos" = "LATEST"
+          "aws.region"           = data.aws_region.current.name
+        }
+      }
+
+      property_group {
+        property_group_id = "producer.config.0"
+
+        property_map = {
+          "output.stream.name" = aws_kinesis_stream.nba_tampering_output[0].name
+          "shard.count"        = aws_kinesis_stream.nba_tampering_output[0].shard_count
+          "aws.region"         = data.aws_region.current.name
+        }
+      }
+    }
+
+    flink_application_configuration {
+      checkpoint_configuration {
+        configuration_type = "DEFAULT"
+      }
+
+      monitoring_configuration {
+        configuration_type = "CUSTOM"
+        log_level          = "DEBUG"
+        metrics_level      = "TASK"
+      }
+
+      parallelism_configuration {
+        auto_scaling_enabled = true
+        configuration_type   = "CUSTOM"
+        parallelism          = 1
+        parallelism_per_kpu  = 1
+      }
+    }
+  }
+
+  cloudwatch_logging_options {
+    log_stream_arn = aws_cloudwatch_log_stream.analytics[0].arn
+  }
+}
+
+resource "aws_iam_role" "analytics" {
+  count = var.enable_kinesis_data_analytics ? 1 : 0
+  name  = "${var.name_prefix}-analytics-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "kinesisanalytics.amazonaws.com"
+        }
+      },
+    ]
+  })
+  inline_policy {
+    name = "policy"
+    policy = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Action   = "cloudwatch:*",
+          Effect   = "Allow"
+          Resource = "*"
+        },
+        {
+          Action   = "logs:*",
+          Effect   = "Allow"
+          Resource = "*"
+        },
+        {
+          Action   = "s3:*",
+          Effect   = "Allow"
+          Resource = "*"
+        },
+        {
+          Action   = "kinesis:*",
+          Effect   = "Allow"
+          Resource = "*"
+        }
+      ]
+    })
+  }
+}
+
+resource "aws_cloudwatch_log_group" "analytics" {
+  count = var.enable_kinesis_data_analytics ? 1 : 0
+  name  = "${var.name_prefix}-analytics-log"
+}
+
+resource "aws_cloudwatch_log_stream" "analytics" {
+  count          = var.enable_kinesis_data_analytics ? 1 : 0
+  name           = "${var.name_prefix}-log-stream"
+  log_group_name = aws_cloudwatch_log_group.analytics[0].name
 }

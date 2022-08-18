@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
+	"github.com/aws/aws-sdk-go/service/kinesis"
 	"log"
 	"net/http"
 	"os"
@@ -108,6 +109,7 @@ func main() {
 	}
 
 	firehoseService := firehose.New(sess, aws.NewConfig().WithRegion("eu-west-1"))
+	dataStreamService := kinesis.New(sess, aws.NewConfig().WithRegion("eu-west-1"))
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	func() {
@@ -123,31 +125,46 @@ func main() {
 					fmt.Printf("error decoding tweet message %v", err)
 				}
 
-				fmt.Println("tweet")
-				if _, err := firehoseService.PutRecord(&firehose.PutRecordInput{
-					DeliveryStreamName: aws.String(os.Getenv("KINESIS_FIREHOSE_NAME")),
-					Record: &firehose.Record{
-						Data: tmb,
-					},
-				}); err != nil {
-					fmt.Printf("error sending tweet to firehose %v", err)
-				}
-				fmt.Println("Sending Related Tweets..")
-				for _, tweet := range tm.Raw.Includes.Tweets {
-					tweetb, err := json.Marshal(tweet)
-					if err != nil {
-						fmt.Printf("error decoding tweet message %v", err)
-					}
-					fmt.Println("related tweet")
+				if val, present := os.LookupEnv("KINESIS_FIREHOSE_NAME"); present {
+					fmt.Println("Sending tweet to firehose")
 					if _, err := firehoseService.PutRecord(&firehose.PutRecordInput{
-						DeliveryStreamName: aws.String(os.Getenv("KINESIS_FIREHOSE_NAME")),
+						DeliveryStreamName: aws.String(val),
 						Record: &firehose.Record{
-							Data: tweetb,
+							Data: tmb,
 						},
 					}); err != nil {
 						fmt.Printf("error sending tweet to firehose %v", err)
 					}
+
+					fmt.Println("Sending Related Tweets to firehose..")
+					for _, tweet := range tm.Raw.Includes.Tweets {
+						tweetb, err := json.Marshal(tweet)
+						if err != nil {
+							fmt.Printf("error decoding tweet message %v", err)
+						}
+						fmt.Println("related tweet")
+						if _, err := firehoseService.PutRecord(&firehose.PutRecordInput{
+							DeliveryStreamName: aws.String(val),
+							Record: &firehose.Record{
+								Data: tweetb,
+							},
+						}); err != nil {
+							fmt.Printf("error sending tweet to firehose %v", err)
+						}
+					}
 				}
+
+				if val, present := os.LookupEnv("KINESIS_DATA_STREAM_NAME"); present {
+					fmt.Println("Sending tweet to data stream")
+					if _, err := dataStreamService.PutRecord(&kinesis.PutRecordInput{
+						StreamName:   aws.String(val),
+						Data:         tmb,
+						PartitionKey: aws.String("partitionkey"),
+					}); err != nil {
+						fmt.Printf("error sending tweet to data stream %v", err)
+					}
+				}
+
 			default:
 			}
 			if tweetStream.Connection() == false {

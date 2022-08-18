@@ -31,6 +31,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 * [GO](https://go.dev/)
 * [Python](https://www.python.org/)
 * [PySpark](https://spark.apache.org/docs/latest/api/python/)
+* [Flink](https://flink.apache.org/)
 * [Hive](https://hive.apache.org/)
 * [GNUMakeFile](https://www.gnu.org/software/make/manual/make.html)
 
@@ -39,6 +40,9 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 * [S3](https://aws.amazon.com/s3/)
 * [Lambda](https://aws.amazon.com/lambda/)
 * [Kinesis Firehose](https://aws.amazon.com/kinesis/data-firehose/)
+* [Kinesis Data Analytics](https://aws.amazon.com/kinesis/data-analytics/)
+* [Kinesis Data Streams](https://aws.amazon.com/kinesis/data-streams/)
+* [SNS](https://aws.amazon.com/sns/)
 * [GLUE - Catalog, Crawler, Job, Workflow](https://aws.amazon.com/glue/)
 * [Elastic Map Reduce](https://aws.amazon.com/emr/)
 * [Step Functions](https://aws.amazon.com/step-functions/)
@@ -47,7 +51,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 
 ### Components:
 
-**Data Collection**
+xData Collection**
 
 Data collection consist in application written in go app listen twitter stream for tweets.
 The go app configure the twitter stream to receive only tweets related with nba.
@@ -79,11 +83,20 @@ The Data pipeline loads the data resulting from hive queries stored in S3 to a r
 
 ![DataPipeline](DataPipeline.png)
 
-### Quicksight
+**Quicksight**
 
 AWS Data Visualisation tool 
 
 ![NBA Players Related Tweets](Quicksight1.png)
+
+**Kinesis Data Analytics**
+
+![Kinesis Data Analytics](KinesisDataAnalytics.png)
+
+The Kinesis Data Analytics application develop in Flink, detects if a player did two or more tweets to another player in specific time window (Window Sliding).
+The result is sent to a kinesis Data stream consumed by a lambda. The lambda sent a notifications via SNS.
+
+![Notification](NbaTamperingEmail.png)
 
 ## Getting Started
 
@@ -194,23 +207,29 @@ COPY twitter.public.playerstotaltweets
 
 ### Quicksight
 
-**Pre Requisites:**
-
 You can disable quicksight creation by changing terraform variable `enable_quicksight` to false.
+
+**Pre Requisites:**
 
 * Quicksight Account and User
   * To get your user arn, run : `aws quicksight list-users --region <region> --aws-account-id <account_id> --namespace default`
-  
+
+### Kinesis Data Analytics
+
+You can disable kinesis data analytics application creation by changing terraform variable `enable_kinesis_data_analytics` to false.
+
+To generate players tweets run:
+
+```shell
+make data-gen
+```
+
 ## Useful Links
 
 [NBA Players Twitter Accounts](https://www.basketball-reference.com/friv/twitter.html)
 
-[Project Example](https://medium.com/fernando-pereiro/analyzing-twitter-on-real-time-with-aws-big-data-and-machine-learning-services-1fa888f962cf)
-
 ## Work in Progress
 
-* Data Collection App
-  * Create Docker File
 * Glue
   * Glue DataBrew
 * Firehose
@@ -226,23 +245,4 @@ You can disable quicksight creation by changing terraform variable `enable_quick
   * Translate Tweets
 * Amazon Comprehend
   * Tweets Sentimental Analysis
-* Kinesis Data Analytics
-  * Check for NBA tampering. Use window analysis. 3 tweets in 5 minutes = tempering
-    * https://docs.aws.amazon.com/kinesisanalytics/latest/dev/windowed-sql.html
-  * Use Reference data in dynamo with players and team and do tampering by team and also enhanced data with team
 * Data Profiling Solution [Link](https://aws.amazon.com/blogs/big-data/build-an-automatic-data-profiling-and-reporting-solution-with-amazon-emr-aws-glue-and-amazon-quicksight/)
-
-
-## Other Resources
-
-* Athena Query
-
-```sql
-SELECT context.entity.name, count(*)
-FROM twitter_nba_db.tweets, UNNEST(context_annotations) t(context)
-WHERE context.domain.id = '60'
-GROUP BY context.entity.name, year, month, day
-HAVING year = '2022'
-AND month = '08'
-AND day = '10'
-```

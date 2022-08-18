@@ -50,3 +50,12 @@ output "redshift_pipeline_input_s3" {
 output "redshift_s3_role_arn" {
   value = var.enable_redshift ? aws_iam_role.redshift_s3_role[0].arn : null
 }
+
+### Kinesis Data Analytics ###
+output "kinesis_data_stream_source" {
+  value = var.enable_kinesis_data_analytics ? aws_kinesis_stream.nba_tampering[0].name : null
+}
+
+output "kinesis_data_stream_output" {
+  value = var.enable_kinesis_data_analytics ? aws_kinesis_stream.nba_tampering_output[0].name : null
+}

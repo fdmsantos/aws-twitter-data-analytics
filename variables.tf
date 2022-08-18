@@ -40,11 +40,16 @@ variable "enable_redshift" {
 }
 
 variable "enable_quicksight" {
-  type = string
-  default = true
+  type        = string
+  default     = true
   description = "Set it to false to disable quicksight"
 }
 
+variable "enable_kinesis_data_analytics" {
+  type        = string
+  default     = true
+  description = "Set it to false to disable Kinesis Data Analytics"
+}
 ### EMR ###
 variable "emr_vpc_id" {
   type    = string
@@ -63,7 +68,7 @@ variable "key_pair_name" {
 
 variable "emr_applications" {
   type        = list(string)
-  default     = ["Hive"]
+  default     = ["Hive", "Flink"]
   description = "Applications to be installed on EMR cluster"
 }
 
@@ -106,6 +111,12 @@ variable "redshift_password" {
 
 ### Quicksight ###
 variable "quicksight_user_arn" {
-  type = string
+  type    = string
+  default = null
+}
+
+### Analytics ###
+variable "my_email" {
+  type    = string
   default = null
 }

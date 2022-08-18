@@ -1,0 +1,25 @@
+[
+  {
+    "PropertyGroupId": "kinesis.analytics.flink.run.options",
+    "PropertyMap": {
+      "python": "nba-tampering.py",
+      "jarfile": "lib/flink-sql-connector-kinesis_2.12-1.14.5"
+    }
+  },
+  {
+    "PropertyGroupId": "consumer.config.0",
+    "PropertyMap": {
+      "input.stream.name": "twitter-nba-nba-tampering-source",
+      "flink.stream.initpos": "LATEST",
+      "aws.region": "eu-west-1"
+    }
+  },
+  {
+    "PropertyGroupId": "producer.config.0",
+    "PropertyMap": {
+      "output.stream.name": "twitter-nba-nba-tampering-output",
+      "shard.count": "1",
+      "aws.region": "eu-west-1"
+    }
+  }
+]

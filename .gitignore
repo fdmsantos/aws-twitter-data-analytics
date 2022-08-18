@@ -30,3 +30,9 @@ terraform.tfvars
 
 # Ignore Lambda Builds
 builds
+
+# Ignore Python Virtual Environment
+.venv
+
+# Ignore generated files
+Flink.zip
