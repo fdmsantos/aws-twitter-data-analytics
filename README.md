@@ -51,7 +51,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 
 ### Components:
 
-xData Collection**
+**Data Collection**
 
 Data collection consist in application written in go app listen twitter stream for tweets.
 The go app configure the twitter stream to receive only tweets related with nba.
@@ -87,7 +87,7 @@ The Data pipeline loads the data resulting from hive queries stored in S3 to a r
 
 AWS Data Visualisation tool 
 
-![NBA Players Related Tweets](Quicksight1.png)
+![NBA Players Related Tweets](Quicksight.png)
 
 **Kinesis Data Analytics**
 
