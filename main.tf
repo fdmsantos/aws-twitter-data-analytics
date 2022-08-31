@@ -1323,16 +1323,10 @@ resource "aws_quicksight_data_source" "redshift" {
 resource "aws_s3_object" "flink" {
   count  = var.enable_kinesis_data_analytics ? 1 : 0
   bucket = aws_s3_bucket.assets.bucket
-  key    = "FlinkScripts/flink.zip"
-  source = "${path.module}/Flink.zip"
+  key    = "FlinkScripts/nba-tampering-flink-app.jar"
+  source = "${path.module}/08-flink-java/nba-tampering-flink/target/nba-tampering-flink-1.0-SNAPSHOT.jar"
+  etag = filemd5("${path.module}/08-flink-java/nba-tampering-flink/target/nba-tampering-flink-1.0-SNAPSHOT.jar")
 }
-
-#resource "aws_s3_object" "reference_data" {
-#  count  = var.enable_kinesis_data_analytics ? 1 : 0
-#  bucket = aws_s3_bucket.assets.bucket
-#  key    = "FlinkScripts/nba-players-tweet-accounts.csv"
-#  source = "${path.module}/05-flink/nba-players-tweet-accounts.csv"
-#}
 
 resource "aws_kinesis_stream" "nba_tampering" {
   count            = var.enable_kinesis_data_analytics ? 1 : 0
@@ -1455,25 +1449,17 @@ resource "aws_kinesisanalyticsv2_application" "this" {
 
     environment_properties {
       property_group {
-        property_group_id = "kinesis.analytics.flink.run.options"
+        property_group_id = "ControlConsumerConfig"
 
         property_map = {
-          python  = "05-flink/nba-tampering.py"
-          jarfile = "05-flink/lib/flink-sql-connector-kinesis_2.12-1.13.6.jar"
+          "input.stream.name"    = aws_kinesis_stream.tampering_control[0].name
+          "flink.stream.initpos" = "LATEST"
+          "aws.region"           = data.aws_region.current.name
         }
       }
 
-      #      property_group {
-      #        property_group_id = "reference.config.0"
-      #
-      #        property_map = {
-      #          "s3.bucket.name" = aws_s3_object.reference_data[0].bucket
-      #          "s3.bucket.file" = aws_s3_object.reference_data[0].key
-      #        }
-      #      }
-
       property_group {
-        property_group_id = "consumer.config.0"
+        property_group_id = "TweetsConsumerConfig"
 
         property_map = {
           "input.stream.name"    = aws_kinesis_stream.nba_tampering[0].name
@@ -1483,12 +1469,19 @@ resource "aws_kinesisanalyticsv2_application" "this" {
       }
 
       property_group {
-        property_group_id = "producer.config.0"
+        property_group_id = "ProducerConfig"
 
         property_map = {
           "output.stream.name" = aws_kinesis_stream.nba_tampering_output[0].name
-          "shard.count"        = aws_kinesis_stream.nba_tampering_output[0].shard_count
           "aws.region"         = data.aws_region.current.name
+        }
+      }
+
+      property_group {
+        property_group_id = "ApplicationConfig"
+
+        property_map = {
+          "window.seconds" = "30"
         }
       }
     }
@@ -1558,6 +1551,11 @@ resource "aws_iam_role" "analytics" {
           Action   = "kinesis:*",
           Effect   = "Allow"
           Resource = "*"
+        },
+        {
+          Action   = "dynamodb:*",
+          Effect   = "Allow"
+          Resource = "*"
         }
       ]
     })
@@ -1573,4 +1571,145 @@ resource "aws_cloudwatch_log_stream" "analytics" {
   count          = var.enable_kinesis_data_analytics ? 1 : 0
   name           = "${var.name_prefix}-log-stream"
   log_group_name = aws_cloudwatch_log_group.analytics[0].name
+}
+
+resource "aws_dynamodb_table" "tampering_control" {
+  count            = var.enable_kinesis_data_analytics ? 1 : 0
+  name             = "${var.name_prefix}-tampering-control"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "team"
+
+  attribute {
+    name = "team"
+    type = "S"
+  }
+
+}
+
+resource "aws_kinesis_stream" "tampering_control" {
+  count            = var.enable_kinesis_data_analytics ? 1 : 0
+  name             = "${var.name_prefix}-dynamodb-tampering-control"
+  shard_count      = 1
+  retention_period = 48
+
+  shard_level_metrics = [
+    "IncomingBytes",
+    "OutgoingBytes",
+  ]
+
+  stream_mode_details {
+    stream_mode = "PROVISIONED"
+  }
+}
+
+resource "aws_dynamodb_kinesis_streaming_destination" "this" {
+  stream_arn = aws_kinesis_stream.tampering_control[0].arn
+  table_name = aws_dynamodb_table.tampering_control[0].name
+}
+
+resource "aws_dynamodb_table" "players" {
+  count        = var.enable_kinesis_data_analytics ? 1 : 0
+  name         = "${var.name_prefix}-players"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "account"
+
+  attribute {
+    name = "account"
+    type = "S"
+  }
+
+  attribute {
+    name = "name"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "PlayerNameIndex"
+    hash_key        = "name"
+    projection_type = "ALL"
+  }
+}
+
+resource "aws_dynamodb_table_item" "doncic" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "luka7doncic"},
+  "name": {"S": "Luka Doncic"},
+  "team": {"S": "Dallas"}
+}
+ITEM
+}
+
+resource "aws_dynamodb_table_item" "davis" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "AntDavis23"},
+  "name": {"S": "Anthony Davis"},
+  "team": {"S": "LA Lakers"}
+}
+ITEM
+}
+
+resource "aws_dynamodb_table_item" "james" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "KingJames"},
+  "name": {"S": "Lebron James"},
+  "team": {"S": "LA Lakers"}
+}
+ITEM
+}
+
+resource "aws_dynamodb_table_item" "durant" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "KDTrey5"},
+  "name": {"S": "Kevin Durant"},
+  "team": {"S": "BK Nets"}
+}
+ITEM
+}
+
+resource "aws_dynamodb_table_item" "irving" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "KyrieIrving"},
+  "name": {"S": "Kyrie Irving"},
+  "team": {"S": "BK Nets"}
+}
+ITEM
+}
+
+resource "aws_dynamodb_table_item" "curry" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
+  table_name = aws_dynamodb_table.players[0].name
+  hash_key   = aws_dynamodb_table.players[0].hash_key
+
+  item = <<ITEM
+{
+  "account": {"S": "StephenCurry30"},
+  "name": {"S": "Stephen Curry"},
+  "team": {"S": "GS Warriors"}
+}
+ITEM
 }

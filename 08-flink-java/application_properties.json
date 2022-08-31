@@ -1,0 +1,31 @@
+[
+  {
+    "PropertyGroupId": "ControlConsumerConfig",
+    "PropertyMap": {
+      "input.stream.name": "twitter-nba-dynamodb-tampering-control",
+      "flink.stream.initpos": "LATEST",
+      "aws.region": "eu-west-1"
+    }
+  },
+  {
+    "PropertyGroupId": "TweetsConsumerConfig",
+    "PropertyMap": {
+      "input.stream.name": "twitter-nba-nba-tampering-source",
+      "flink.stream.initpos": "LATEST",
+      "aws.region": "eu-west-1"
+    }
+  },
+  {
+    "PropertyGroupId": "ProducerConfig",
+    "PropertyMap": {
+      "output.stream.name": "twitter-nba-nba-tampering-output",
+      "aws.region": "eu-west-1"
+    }
+  },
+  {
+    "PropertyGroupId": "ApplicationConfig",
+    "PropertyMap": {
+      "window.seconds": "30"
+    }
+  }
+]

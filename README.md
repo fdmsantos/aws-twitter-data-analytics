@@ -232,6 +232,8 @@ make data-gen
 
 * Glue
   * Glue DataBrew
+* Kinesis Data Analytics
+  * Integrate with GLUE Schema registry [Link](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations.html)
 * Firehose
   * Enable Comprehension 
   * Enable File Format Conversion to Parquet/ORC

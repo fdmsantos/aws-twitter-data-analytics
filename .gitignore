@@ -36,3 +36,8 @@ builds
 
 # Ignore generated files
 Flink.zip
+
+# Java Files
+*.iml
+target/
+dependency-reduced-pom.xml

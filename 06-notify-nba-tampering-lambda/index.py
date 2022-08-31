@@ -20,7 +20,7 @@ def lambda_handler(event, context):
         json_properties = json.loads(payload)
 
         sns_client.publish(TopicArn=os.environ['TOPIC_ARN'],
-                           Message="Nba Player " + json_properties['sourceplayer'] + " did " + str(json_properties['total']) + ' tweets to player ' + json_properties['destinationplayer'],
+                           Message="Nba Team " + json_properties['team'] + " did " + str(json_properties['total']) + ' tweets to player ' + json_properties['tamperingPlayer'] + '. The tweets was from the following players: ' + json_properties['players'],
                            Subject="NBA Tampering Detect")
 
     return {

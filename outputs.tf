@@ -59,3 +59,19 @@ output "kinesis_data_stream_source" {
 output "kinesis_data_stream_output" {
   value = var.enable_kinesis_data_analytics ? aws_kinesis_stream.nba_tampering_output[0].name : null
 }
+
+output "dynamodb_nba_tampering_table_name" {
+  value = var.enable_kinesis_data_analytics ? aws_dynamodb_table.tampering_control[0].name : null
+}
+
+output "dynamodb_players_table_indexes_name" {
+  value = var.enable_kinesis_data_analytics ? aws_dynamodb_table.players[0].global_secondary_index.*.name : null
+}
+
+output "dynamodb_players_table_name" {
+  value = var.enable_kinesis_data_analytics ? aws_dynamodb_table.players[0].name : null
+}
+
+output "kinesis_data_stream_tampering_control" {
+  value = var.enable_kinesis_data_analytics ? aws_kinesis_stream.tampering_control[0].name : null
+}

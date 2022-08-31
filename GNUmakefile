@@ -42,10 +42,15 @@ create-venv-flink:
 	pip install -r 05-flink/requirements.txt
 
 data-gen:
-	python 07-datagen/data-gen.py --stream_name $(KINESIS_DATA_STREAM_IN)
+	python 07-datagen/data-gen-test.py --stream_name $(KINESIS_DATA_STREAM_IN)
 
-deploy:
+package-flink:
+	mvn -f 08-flink-java/nba-tampering-flink/pom.xml package
+
+zip-python-flink:
 	zip -r Flink.zip 05-flink -x 05-flink/.venv/**\* 05-flink/requirements.txt 05-flink/application_properties.json  05-flink/.venv
+
+deploy: package-flink
 	terraform init
 	terraform apply
 
