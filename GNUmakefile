@@ -42,7 +42,7 @@ create-venv-flink:
 	pip install -r 05-flink/requirements.txt
 
 data-gen:
-	python 07-datagen/data-gen-test.py --stream_name $(KINESIS_DATA_STREAM_IN)
+	python 07-datagen/data-gen.py --stream_name $(KINESIS_DATA_STREAM_IN)
 
 package-flink:
 	mvn -f 08-flink-java/nba-tampering-flink/pom.xml package

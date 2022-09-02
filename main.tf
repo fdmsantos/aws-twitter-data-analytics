@@ -1325,7 +1325,7 @@ resource "aws_s3_object" "flink" {
   bucket = aws_s3_bucket.assets.bucket
   key    = "FlinkScripts/nba-tampering-flink-app.jar"
   source = "${path.module}/08-flink-java/nba-tampering-flink/target/nba-tampering-flink-1.0-SNAPSHOT.jar"
-  etag = filemd5("${path.module}/08-flink-java/nba-tampering-flink/target/nba-tampering-flink-1.0-SNAPSHOT.jar")
+  etag   = filemd5("${path.module}/08-flink-java/nba-tampering-flink/target/nba-tampering-flink-1.0-SNAPSHOT.jar")
 }
 
 resource "aws_kinesis_stream" "nba_tampering" {
@@ -1574,10 +1574,10 @@ resource "aws_cloudwatch_log_stream" "analytics" {
 }
 
 resource "aws_dynamodb_table" "tampering_control" {
-  count            = var.enable_kinesis_data_analytics ? 1 : 0
-  name             = "${var.name_prefix}-tampering-control"
-  billing_mode     = "PAY_PER_REQUEST"
-  hash_key         = "team"
+  count        = var.enable_kinesis_data_analytics ? 1 : 0
+  name         = "${var.name_prefix}-tampering-control"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "team"
 
   attribute {
     name = "team"
@@ -1603,6 +1603,7 @@ resource "aws_kinesis_stream" "tampering_control" {
 }
 
 resource "aws_dynamodb_kinesis_streaming_destination" "this" {
+  count      = var.enable_kinesis_data_analytics ? 1 : 0
   stream_arn = aws_kinesis_stream.tampering_control[0].arn
   table_name = aws_dynamodb_table.tampering_control[0].name
 }

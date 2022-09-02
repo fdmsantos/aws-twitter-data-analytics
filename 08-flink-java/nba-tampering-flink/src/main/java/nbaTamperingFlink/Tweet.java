@@ -1,22 +1,16 @@
 package nbaTamperingFlink;
 
 public class Tweet {
-    private Long eventTime;
     private Player sourcePlayer;
     private Player destinationPlayer;
 
-    public Tweet(Long eventTime,Player sourcePlayer, Player destinationPlayer) {
-        this.eventTime = eventTime;
+    public Tweet(Player sourcePlayer, Player destinationPlayer) {
         this.sourcePlayer = sourcePlayer;
         this.destinationPlayer = destinationPlayer;
     }
 
     public String toString(){
         return sourcePlayer.getName()+" "+destinationPlayer.getName();
-    }
-
-    public Long getEventTime(){
-        return eventTime;
     }
 
     public Player getSourcePlayer() {
@@ -26,5 +20,4 @@ public class Tweet {
     public Player getDestinationPlayer() {
         return destinationPlayer;
     }
-
 }

@@ -32,6 +32,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 * [Python](https://www.python.org/)
 * [PySpark](https://spark.apache.org/docs/latest/api/python/)
 * [Flink](https://flink.apache.org/)
+* [Java](https://www.java.com/)
 * [Hive](https://hive.apache.org/)
 * [GNUMakeFile](https://www.gnu.org/software/make/manual/make.html)
 
@@ -48,6 +49,7 @@ The main goal for this project is learning/test/play Data Analytics in AWS using
 * [Step Functions](https://aws.amazon.com/step-functions/)
 * [Redshift](https://aws.amazon.com/redshift/)
 * [Data Pipeline](https://aws.amazon.com/datapipeline/)
+* [DynamoDB](https://aws.amazon.com/dynamodb/)
 
 ### Components:
 
@@ -93,10 +95,20 @@ AWS Data Visualisation tool
 
 ![Kinesis Data Analytics](KinesisDataAnalytics.png)
 
-The Kinesis Data Analytics application develop in Flink, detects if a player did two or more tweets to another player in specific time window (Window Sliding).
+The Kinesis Data Analytics application develop in Flink, detects if a players from one team did two or more tweets to a player in other team within a specific time window (Tumbling Window).
 The result is sent to a kinesis Data stream consumed by a lambda. The lambda sent a notifications via SNS.
+This application uses another stream to control if team is allowed to do tampering. The source of this stream is dynamodb kinesis stream.
+This application also uses Dynamodb Table to reference data.
 
 ![Notification](NbaTamperingEmail.png)
+
+
+Flink Features in This App:
+
+* Connected Streams
+* Keyed Streams
+* Stateful Stream Processing
+* Windowing Processing
 
 ## Getting Started
 
@@ -224,15 +236,14 @@ To generate players tweets run:
 make data-gen
 ```
 
-## Useful Links
-
-[NBA Players Twitter Accounts](https://www.basketball-reference.com/friv/twitter.html)
-
 ## Work in Progress
 
 * Glue
   * Glue DataBrew
 * Kinesis Data Analytics
+  * Timely Stream Processing With Watermarks and Event Time [Issue](https://stackoverflow.com/questions/73584522/flink-watermarks-on-event-time)
+  * And latency and add Late Events with Site Output
+  * Flink UI (name and uid)
   * Integrate with GLUE Schema registry [Link](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations.html)
 * Firehose
   * Enable Comprehension 

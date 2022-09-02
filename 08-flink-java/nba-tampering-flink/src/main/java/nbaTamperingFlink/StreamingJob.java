@@ -5,6 +5,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 
 import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
@@ -12,20 +13,26 @@ import com.amazonaws.services.kinesisanalytics.runtime.models.PropertyGroup;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
@@ -33,6 +40,7 @@ import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.Collector;
 import software.amazon.awssdk.core.pagination.sync.SdkIterable;
 import software.amazon.awssdk.enhanced.dynamodb.*;
@@ -70,18 +78,11 @@ public class StreamingJob {
 		sinkProperties.put(AWSConfigConstants.AWS_REGION, producerProperties.getProperty("aws.region"));
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-//		Configuration conf = new Configuration();
-//		StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf);
-
 
 		DataStream<Tuple2<String, Boolean>> tamperingControl = env
 				.addSource(new FlinkKinesisConsumer<>(controlConsumerProperties.getProperty("input.stream.name"), new SimpleStringSchema(), consumerControlConfig))
 				.map(new EnrichControl())
 				.keyBy(value -> value.f0);
-
-//		WatermarkStrategy<Tweet> strategy = WatermarkStrategy
-//				.<Tweet>forBoundedOutOfOrderness(Duration.ofSeconds(40))
-//				.withTimestampAssigner((event, timestamp) -> event.getEventTime());
 
 		DataStream<Tweet> tweets = env
 				.addSource(new FlinkKinesisConsumer<>(tweetsConsumerProperties.getProperty("input.stream.name"), new SimpleStringSchema(), consumerTweetsConfig))
@@ -96,7 +97,6 @@ public class StreamingJob {
 		tamperingControl
 				.connect(tweets)
 				.flatMap(new TamperingControl())
-//				.assignTimestampsAndWatermarks(strategy)
 				.keyBy(new KeySelector<Tweet, Tuple2<String, String>>() {
 					@Override
 					public Tuple2<String, String> getKey(Tweet value) throws Exception {
@@ -104,15 +104,12 @@ public class StreamingJob {
 					}
 				})
 				.window(TumblingProcessingTimeWindows.of(Time.seconds(Integer.parseInt(appProperties.getProperty("window.seconds")))))
-				.allowedLateness(Time.seconds(30))
 				.process(new MyProcessWindowFunction())
 				.addSink(kinesisSink);
-//				.print();
 
 		// execute program
 		env.execute("Flink Streaming Java API Nba Tampering");
 	}
-
 
 	public static class EnrichTweet extends RichMapFunction<String, Tweet> {
 
@@ -176,11 +173,11 @@ public class StreamingJob {
 
 			PageIterable<Player> pages = PageIterable.create(destinationPlayerQuery);
 			return new Tweet(
-					jsonNode.get("event_time").asLong(),
 					sourcePlayer,
 					pages.items().iterator().next()
 			);
 		}
+
 	}
 
 	public static class EnrichControl extends RichMapFunction<String, Tuple2<String, Boolean>> {
@@ -252,7 +249,6 @@ public class StreamingJob {
 				result.put("total", count);
 				result.put("players", String.valueOf(players));
 				result.put("window", String.valueOf(context.window()));
-//				result.put("currentTimestamp", new Date().getTime()); // TO Remove
 				out.collect(result.toString());
 			}
 		}
