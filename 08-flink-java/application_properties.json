@@ -25,7 +25,10 @@
   {
     "PropertyGroupId": "ApplicationConfig",
     "PropertyMap": {
-      "window.seconds": "30"
+      "window.seconds": "30",
+      "lateness.seconds": "30",
+      "watermark.seconds": "20",
+      "idle.seconds": "90"
     }
   }
 ]

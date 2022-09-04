@@ -102,12 +102,12 @@ This application also uses Dynamodb Table to reference data.
 
 ![Notification](NbaTamperingEmail.png)
 
-
 Flink Features in This App:
 
-* Connected Streams
+* Two Connected Streams
 * Keyed Streams
 * Stateful Stream Processing
+* Timely Stream Processing With Watermarks and Event Time
 * Windowing Processing
 
 ## Getting Started
@@ -241,8 +241,7 @@ make data-gen
 * Glue
   * Glue DataBrew
 * Kinesis Data Analytics
-  * Timely Stream Processing With Watermarks and Event Time [Issue](https://stackoverflow.com/questions/73584522/flink-watermarks-on-event-time)
-  * And latency and add Late Events with Site Output
+  * And latency and add Late Events with Side Output
   * Flink UI (name and uid)
   * Integrate with GLUE Schema registry [Link](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations.html)
 * Firehose

@@ -10,37 +10,28 @@ import java.util.*;
 
 import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
 import com.amazonaws.services.kinesisanalytics.runtime.models.PropertyGroup;
-import org.apache.flink.api.common.eventtime.WatermarkGenerator;
-import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
-import org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.Collector;
 import software.amazon.awssdk.core.pagination.sync.SdkIterable;
 import software.amazon.awssdk.enhanced.dynamodb.*;
@@ -78,6 +69,13 @@ public class StreamingJob {
 		sinkProperties.put(AWSConfigConstants.AWS_REGION, producerProperties.getProperty("aws.region"));
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+//		Configuration conf = new Configuration();
+//		StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf);
+
+		WatermarkStrategy<Tweet> ws = WatermarkStrategy
+				.<Tweet>forBoundedOutOfOrderness(Duration.ofSeconds(Integer.parseInt(appProperties.getProperty("watermark.seconds"))))
+				.withTimestampAssigner((tweet, timestamp) -> tweet.getEventTime())
+				.withIdleness(Duration.ofSeconds(Integer.parseInt(appProperties.getProperty("idle.seconds"))));
 
 		DataStream<Tuple2<String, Boolean>> tamperingControl = env
 				.addSource(new FlinkKinesisConsumer<>(controlConsumerProperties.getProperty("input.stream.name"), new SimpleStringSchema(), consumerControlConfig))
@@ -97,13 +95,15 @@ public class StreamingJob {
 		tamperingControl
 				.connect(tweets)
 				.flatMap(new TamperingControl())
+				.assignTimestampsAndWatermarks(ws)
 				.keyBy(new KeySelector<Tweet, Tuple2<String, String>>() {
 					@Override
 					public Tuple2<String, String> getKey(Tweet value) throws Exception {
 						return Tuple2.of(value.getSourcePlayer().getTeam(), value.getDestinationPlayer().getName());
 					}
 				})
-				.window(TumblingProcessingTimeWindows.of(Time.seconds(Integer.parseInt(appProperties.getProperty("window.seconds")))))
+				.window(TumblingEventTimeWindows.of(Time.seconds(Integer.parseInt(appProperties.getProperty("window.seconds")))))
+				.allowedLateness(Time.seconds(Integer.parseInt(appProperties.getProperty("lateness.seconds"))))
 				.process(new MyProcessWindowFunction())
 				.addSink(kinesisSink);
 
@@ -173,6 +173,7 @@ public class StreamingJob {
 
 			PageIterable<Player> pages = PageIterable.create(destinationPlayerQuery);
 			return new Tweet(
+					jsonNode.get("event_time").longValue(),
 					sourcePlayer,
 					pages.items().iterator().next()
 			);
@@ -234,7 +235,7 @@ public class StreamingJob {
 		public void process(Tuple2<String, String> key, ProcessWindowFunction<Tweet, String, Tuple2<String, String>, TimeWindow>.Context context, Iterable<Tweet> input, Collector<String> out) {
 			ObjectMapper mapper = new ObjectMapper();
 			ObjectNode result = mapper.createObjectNode();
-			long count = 0;
+			int count = 0;
 			Set<String> players = new HashSet<>();
 			for (Tweet in : input) {
 				if (!Objects.equals(in.getSourcePlayer().getTeam(), in.getDestinationPlayer().getTeam())) {
@@ -273,3 +274,4 @@ public class StreamingJob {
 		return appProperties;
 	}
 }
+

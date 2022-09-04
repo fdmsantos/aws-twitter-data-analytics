@@ -1481,7 +1481,10 @@ resource "aws_kinesisanalyticsv2_application" "this" {
         property_group_id = "ApplicationConfig"
 
         property_map = {
-          "window.seconds" = "30"
+          "window.seconds"    = "60"
+          "lateness.seconds"  = "30"
+          "watermark.seconds" = "20"
+          "idle.seconds"      = "90"
         }
       }
     }

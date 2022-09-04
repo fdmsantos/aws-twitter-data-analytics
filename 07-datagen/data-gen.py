@@ -15,7 +15,7 @@ def randint(min=0, max=100000):
 
 def get_data():
     return {
-        'event_time': datetime.datetime.now().isoformat(),
+        'event_time': round(time.time() * 1000),
         'data': [{
             "text": "Dummy Text",
             "context_annotations": [
