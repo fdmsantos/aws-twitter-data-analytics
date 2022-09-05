@@ -30,5 +30,21 @@
       "watermark.seconds": "20",
       "idle.seconds": "90"
     }
+  },
+  {
+    "PropertyGroupId": "LateDataProducer",
+    "PropertyMap": {
+      "s3.path": "s3a://twitter-nba-datalake/flink-late-events",
+      "encoder": "UTF-8"
+    }
+  },
+  {
+    "PropertyGroupId": "AllTweetsProducer",
+    "PropertyMap": {
+      "s3.path": "s3a://twitter-nba-datalake/flink-all-tweets",
+      "encoder": "UTF-8"
+    }
   }
 ]
+
+

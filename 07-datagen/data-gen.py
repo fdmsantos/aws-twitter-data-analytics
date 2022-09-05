@@ -56,7 +56,50 @@ def get_data():
     }
 
 
+# def get_data_late(event_time):
+#     return {
+#         'event_time': event_time,
+#         'data': [{
+#             "text": "Dummy Text",
+#             "context_annotations": [
+#                 {
+#                     "domain": {
+#                         "id": "3",
+#                         "name": "TV Shows",
+#                         "description": "Television shows from around the world"
+#                     },
+#                     "entity": {
+#                         "id": "10000607734",
+#                         "name": "NBA Basketball",
+#                         "description": "All the latest basketball action from the NBA."
+#                     }
+#                 },
+#                 {
+#                     "domain": {
+#                         "id": "60",
+#                         "name": "Athlete",
+#                         "description": "An athlete in the world, like Serena Williams or Lionel Messi"
+#                     },
+#                     "entity": {
+#                         "id": "1142269203002454017",
+#                         "name": random.choice(destination_players)
+#                     }
+#                 }
+#
+#             ],
+#             "id": randint(),
+#         }],
+#         'includes': {
+#             "users": [
+#                 {
+#                     "username": random.choice(source_players),
+#                 }
+#             ]
+#         }
+#     }
+
 def generate(stream_name, kinesis_client):
+    #event_time = round(time.time() * 1000)
     while True:
         data = get_data()
         print(data)
@@ -65,6 +108,12 @@ def generate(stream_name, kinesis_client):
             Data=json.dumps(data),
             PartitionKey="partitionkey")
         time.sleep(2)
+#         late_event = get_data_late(event_time)
+#         print("Late Event")
+#         kinesis_client.put_record(
+#                     StreamName=stream_name,
+#                     Data=json.dumps(late_event),
+#                     PartitionKey="partitionkey")
 
 
 if __name__ == '__main__':

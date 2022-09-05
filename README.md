@@ -99,6 +99,7 @@ The Kinesis Data Analytics application develop in Flink, detects if a players fr
 The result is sent to a kinesis Data stream consumed by a lambda. The lambda sent a notifications via SNS.
 This application uses another stream to control if team is allowed to do tampering. The source of this stream is dynamodb kinesis stream.
 This application also uses Dynamodb Table to reference data.
+The Late data is sent to an S3 Bucket, and all tweets also are sent to another S3 data to archive.
 
 ![Notification](NbaTamperingEmail.png)
 
@@ -109,6 +110,7 @@ Flink Features in This App:
 * Stateful Stream Processing
 * Timely Stream Processing With Watermarks and Event Time
 * Windowing Processing
+* Side Outputs To Late Events and All Tweets
 
 ## Getting Started
 
@@ -241,8 +243,6 @@ make data-gen
 * Glue
   * Glue DataBrew
 * Kinesis Data Analytics
-  * And latency and add Late Events with Side Output
-  * Flink UI (name and uid)
   * Integrate with GLUE Schema registry [Link](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations.html)
 * Firehose
   * Enable Comprehension 

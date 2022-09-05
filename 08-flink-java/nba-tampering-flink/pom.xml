@@ -73,6 +73,12 @@ under the License.
 			<scope>provided</scope>
 		</dependency>
 
+<!--		<dependency>-->
+<!--			<groupId>org.apache.flink</groupId>-->
+<!--			<artifactId>flink-s3-fs-hadoop</artifactId>-->
+<!--			<version>${flink.version}</version>-->
+<!--		</dependency>-->
+
 		<!-- Add connector dependencies here. They must be in the default scope (compile). -->
 
 		<dependency>
@@ -194,6 +200,7 @@ under the License.
 							</transformers>
 						</configuration>
 					</execution>
+
 				</executions>
 			</plugin>
 		</plugins>

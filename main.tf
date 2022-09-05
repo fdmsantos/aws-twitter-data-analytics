@@ -1487,6 +1487,24 @@ resource "aws_kinesisanalyticsv2_application" "this" {
           "idle.seconds"      = "90"
         }
       }
+
+      property_group {
+        property_group_id = "LateDataProducer"
+
+        property_map = {
+          "s3.path" = "s3a://${aws_s3_bucket.dataLake.bucket}/flink-late-events"
+          "encoder" = "UTF-8"
+        }
+      }
+
+      property_group {
+        property_group_id = "AllTweetsProducer"
+
+        property_map = {
+          "s3.path" = "s3a://${aws_s3_bucket.dataLake.bucket}/flink-all-tweets"
+          "encoder" = "UTF-8"
+        }
+      }
     }
 
     flink_application_configuration {
@@ -1503,7 +1521,7 @@ resource "aws_kinesisanalyticsv2_application" "this" {
       parallelism_configuration {
         auto_scaling_enabled = true
         configuration_type   = "CUSTOM"
-        parallelism          = 1
+        parallelism          = 3
         parallelism_per_kpu  = 1
       }
     }

@@ -3,27 +3,29 @@ package nbaTamperingFlink;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.security.Timestamp;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.*;
 
 import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
 import com.amazonaws.services.kinesisanalytics.runtime.models.PropertyGroup;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.serialization.SimpleStringEncoder;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
+import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
@@ -33,6 +35,7 @@ import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.OutputTag;
 import software.amazon.awssdk.core.pagination.sync.SdkIterable;
 import software.amazon.awssdk.enhanced.dynamodb.*;
 import software.amazon.awssdk.enhanced.dynamodb.model.Page;
@@ -45,6 +48,8 @@ import static software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional.ke
 
 public class StreamingJob {
 
+	private static final OutputTag<Tweet> allOutputTag = new OutputTag<Tweet>("all-tweets") {};
+
 	public static void main(String[] args) throws Exception {
 		Map<String, Properties> applicationProperties;
 		if (Boolean.parseBoolean(System.getenv("IS_LOCAL"))) {
@@ -56,6 +61,8 @@ public class StreamingJob {
 		Properties tweetsConsumerProperties = applicationProperties.get("TweetsConsumerConfig");
 		Properties producerProperties = applicationProperties.get("ProducerConfig");
 		Properties appProperties = applicationProperties.get("ApplicationConfig");
+		Properties lateProducerProperties = applicationProperties.get("LateDataProducer");
+		Properties allTweetsProducerProperties = applicationProperties.get("AllTweetsProducer");
 
 		Properties consumerControlConfig = new Properties();
 		consumerControlConfig.put(AWSConfigConstants.AWS_REGION, controlConsumerProperties.get("aws.region"));
@@ -69,8 +76,9 @@ public class StreamingJob {
 		sinkProperties.put(AWSConfigConstants.AWS_REGION, producerProperties.getProperty("aws.region"));
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-//		Configuration conf = new Configuration();
 //		StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf);
+
+		final OutputTag<Tweet> lateOutputTag = new OutputTag<Tweet>("late-data"){};
 
 		WatermarkStrategy<Tweet> ws = WatermarkStrategy
 				.<Tweet>forBoundedOutOfOrderness(Duration.ofSeconds(Integer.parseInt(appProperties.getProperty("watermark.seconds"))))
@@ -79,11 +87,13 @@ public class StreamingJob {
 
 		DataStream<Tuple2<String, Boolean>> tamperingControl = env
 				.addSource(new FlinkKinesisConsumer<>(controlConsumerProperties.getProperty("input.stream.name"), new SimpleStringSchema(), consumerControlConfig))
+				.name("Tampering Control")
 				.map(new EnrichControl())
 				.keyBy(value -> value.f0);
 
 		DataStream<Tweet> tweets = env
 				.addSource(new FlinkKinesisConsumer<>(tweetsConsumerProperties.getProperty("input.stream.name"), new SimpleStringSchema(), consumerTweetsConfig))
+				.name("Tweets")
 				.map(new EnrichTweet())
 				.keyBy(value -> value.getSourcePlayer().getTeam());
 
@@ -92,9 +102,18 @@ public class StreamingJob {
 		kinesisSink.setDefaultStream(producerProperties.getProperty("output.stream.name"));
 		kinesisSink.setDefaultPartition("0");
 
-		tamperingControl
+		final StreamingFileSink<Tweet> s3Sink = StreamingFileSink
+				.forRowFormat(new Path(lateProducerProperties.getProperty("s3.path")), new SimpleStringEncoder<Tweet>(lateProducerProperties.getProperty("encoder")))
+				.build();
+
+		final StreamingFileSink<Tweet> s3AllSink = StreamingFileSink
+				.forRowFormat(new Path(allTweetsProducerProperties.getProperty("s3.path")), new SimpleStringEncoder<Tweet>(allTweetsProducerProperties.getProperty("encoder")))
+				.build();
+
+		SingleOutputStreamOperator<String> result = tamperingControl
 				.connect(tweets)
 				.flatMap(new TamperingControl())
+				.name("Map Tweets with Control")
 				.assignTimestampsAndWatermarks(ws)
 				.keyBy(new KeySelector<Tweet, Tuple2<String, String>>() {
 					@Override
@@ -104,8 +123,16 @@ public class StreamingJob {
 				})
 				.window(TumblingEventTimeWindows.of(Time.seconds(Integer.parseInt(appProperties.getProperty("window.seconds")))))
 				.allowedLateness(Time.seconds(Integer.parseInt(appProperties.getProperty("lateness.seconds"))))
+				.sideOutputLateData(lateOutputTag)
 				.process(new MyProcessWindowFunction())
-				.addSink(kinesisSink);
+				.name("Process Tampering");
+
+		DataStream<Tweet> lateStream = result.getSideOutput(lateOutputTag);
+		DataStream<Tweet> allTweetsStream = result.getSideOutput(allOutputTag);
+
+		result.addSink(kinesisSink).name("Result Events");
+		lateStream.addSink(s3Sink).name("Late Events");
+		allTweetsStream.addSink(s3AllSink).name("All Events");
 
 		// execute program
 		env.execute("Flink Streaming Java API Nba Tampering");
@@ -242,6 +269,7 @@ public class StreamingJob {
 					count++;
 					players.add(in.getSourcePlayer().getName());
 				}
+				context.output(allOutputTag, in);
 			}
 
 			if (count > 1) {
