@@ -68,130 +68,29 @@ module "firehose_lambda_transformation" {
   attach_policy_json                = false
 }
 
-resource "aws_iam_role" "firehose_role" {
-  count = var.enable_data_collection ? 1 : 0
-  name  = "${var.name_prefix}-firehose-role"
-
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": "sts:AssumeRole",
-      "Principal": {
-        "Service": "firehose.amazonaws.com"
-      },
-      "Effect": "Allow",
-      "Sid": ""
-    }
-  ]
+module "firehose" {
+  count                                        = var.enable_data_collection ? 1 : 0
+  source                                       = "fdmsantos/kinesis-firehose/aws"
+  version                                      = "1.0.0"
+  name                                         = "${var.name_prefix}-data-collection"
+  destination                                  = "extended_s3"
+  s3_bucket_arn                                = aws_s3_bucket.dataLake.arn
+  buffer_size                                  = 64
+  buffer_interval                              = 60
+  s3_prefix                                    = "${local.raw_data_location_prefix}/year=!{partitionKeyFromQuery:year}/month=!{partitionKeyFromQuery:month}/day=!{partitionKeyFromQuery:day}/"
+  s3_error_output_prefix                       = "errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/error=!{firehose:error-output-type}/"
+  enable_s3_backup                             = true
+  s3_backup_bucket_arn                         = aws_s3_bucket.dataLake.arn
+  s3_backup_error_output_prefix                = "original-data-errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/error=!{firehose:error-output-type}/"
+  s3_backup_prefix                             = "original-data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+  s3_backup_buffer_interval                    = 300
+  s3_backup_compression                        = "GZIP"
+  enable_dynamic_partitioning                  = true
+  dynamic_partition_append_delimiter_to_record = true
+  dynamic_partition_metadata_extractor_query   = "{year:.created_at[0:4],month:.created_at[5:7],day:.created_at[8:10]}"
+  enable_lambda_transform                      = true
+  transform_lambda_arn                         = "${module.firehose_lambda_transformation[0].lambda_function_arn}:$LATEST"
 }
-EOF
-}
-
-resource "aws_iam_role_policy" "firehose-s3" {
-  count  = var.enable_data_collection ? 1 : 0
-  name   = "s3"
-  role   = aws_iam_role.firehose_role[0].id
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:*"
-      ],
-      "Resource": [
-        "${aws_s3_bucket.dataLake.arn}",
-        "${aws_s3_bucket.dataLake.arn}/*"
-      ]
-    }
-  ]
-}
-EOF
-}
-
-resource "aws_iam_role_policy" "firehose-lambda" {
-  count  = var.enable_data_collection ? 1 : 0
-  name   = "lambda"
-  role   = aws_iam_role.firehose_role[0].id
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "lambda:InvokeFunction",
-        "lambda:GetFunctionConfiguration"
-      ],
-      "Resource": "${module.firehose_lambda_transformation[0].lambda_function_arn}:*"
-    }
-  ]
-}
-EOF
-}
-
-resource "aws_kinesis_firehose_delivery_stream" "this" {
-  count       = var.enable_data_collection ? 1 : 0
-  name        = "${var.name_prefix}-data-collection"
-  destination = "extended_s3"
-
-  extended_s3_configuration {
-    role_arn        = aws_iam_role.firehose_role[0].arn
-    bucket_arn      = aws_s3_bucket.dataLake.arn
-    buffer_interval = 60
-    buffer_size     = 64
-
-    prefix              = "${local.raw_data_location_prefix}/year=!{partitionKeyFromQuery:year}/month=!{partitionKeyFromQuery:month}/day=!{partitionKeyFromQuery:day}/"
-    error_output_prefix = "errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/error=!{firehose:error-output-type}/"
-
-    s3_backup_mode = "Enabled"
-    s3_backup_configuration {
-      role_arn            = aws_iam_role.firehose_role[0].arn
-      bucket_arn          = aws_s3_bucket.dataLake.arn
-      prefix              = "original-data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-      error_output_prefix = "original-data-errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/error=!{firehose:error-output-type}/"
-      buffer_interval     = 300
-      compression_format  = "GZIP"
-    }
-
-    dynamic_partitioning_configuration {
-      enabled = "true"
-    }
-
-    processing_configuration {
-      enabled = "true"
-
-      processors {
-        type = "AppendDelimiterToRecord"
-      }
-
-      processors {
-        type = "Lambda"
-
-        parameters {
-          parameter_name  = "LambdaArn"
-          parameter_value = "${module.firehose_lambda_transformation[0].lambda_function_arn}:$LATEST"
-        }
-      }
-
-      processors {
-        type = "MetadataExtraction"
-        parameters {
-          parameter_name  = "JsonParsingEngine"
-          parameter_value = "JQ-1.6"
-        }
-        parameters {
-          parameter_name  = "MetadataExtractionQuery"
-          parameter_value = "{year:.created_at[0:4],month:.created_at[5:7],day:.created_at[8:10]}"
-        }
-      }
-    }
-  }
-}
-
 ################# GLUE #################
 ###### ETL ######
 data "template_file" "drop_duplicates" {

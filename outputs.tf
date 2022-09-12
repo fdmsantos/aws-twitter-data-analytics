@@ -4,7 +4,7 @@ output "s3_datalake_bucket" {
 
 ### FIREHOSE ###
 output "data_collection_stream_name" {
-  value = var.enable_data_collection ? aws_kinesis_firehose_delivery_stream.this[0].name : null
+  value = var.enable_data_collection ? "${var.name_prefix}-data-collection" : null
 }
 
 ### GLUE ###
